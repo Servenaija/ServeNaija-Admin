@@ -48,8 +48,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [kycRecords, setKycRecords] = useState<KYCRecord[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
-  const [adminName, setAdminName] = useState('Super Admin');
-  const [adminEmail, setAdminEmail] = useState('admin@servenaija.ng');
+  const [adminName, setAdminName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
 
   const fetchProviders = useCallback(async () => {
     try {
