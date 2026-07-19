@@ -8,7 +8,7 @@ import logoText from '../../assets/serveNaija-text.png';
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [email, setEmail] = useState('admin@servenaija.ng');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
@@ -118,7 +118,7 @@ export default function LoginPage() {
                   autoComplete="email"
                   className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition-all"
                   style={{ '--tw-ring-color': 'rgba(22,91,67,0.3)' } as React.CSSProperties}
-                  placeholder="admin@servenaija.ng"
+                  placeholder="Enter admin password"
                 />
               </div>
 
