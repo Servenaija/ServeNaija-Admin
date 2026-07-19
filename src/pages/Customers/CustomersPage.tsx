@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout/Layout';
 import Table from '../../components/UI/Table';
@@ -6,35 +6,40 @@ import { Badge } from '../../components/UI/Badge';
 import SearchInput from '../../components/UI/SearchInput';
 import Button from '../../components/UI/Button';
 import Avatar from '../../components/UI/Avatar';
-import { useApp } from '../../context/AppContext';
-import { Filter, Ban, CheckCircle, UserCheck } from 'lucide-react';
-import type { Customer } from '../../types';
+import { listCustomers } from '../../services/api';
+import { Filter, Ban, CheckCircle } from 'lucide-react';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function CustomersPage() {
-  const { customers } = useApp();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'banned' | 'agents' | 'unverified'>('all');
+  const [customers, setCustomers] = useState<Row[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const filtered = customers.filter((c) => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || c.fullName.toLowerCase().includes(q)
-      || c.email.toLowerCase().includes(q) || c.phoneNumber.includes(q);
-    const matchFilter =
-      filter === 'all' ? true :
-      filter === 'active' ? !c.isBanned :
-      filter === 'banned' ? c.isBanned :
-      filter === 'agents' ? c.isAgent :
-      filter === 'unverified' ? !c.isEmailVerified || !c.isPhoneVerified : true;
-    return matchSearch && matchFilter;
-  });
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setLoading(true);
+      listCustomers({ search: search || undefined, filter: filter !== 'all' ? filter : undefined, limit: 100, page: 0 })
+        .then((res) => { setCustomers(res.customers as Row[]); setTotal(res.total); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, 300);
+  }, [search, filter]);
+
+  const filtered = customers;
 
   const columns = [
     {
       key: 'name', header: 'Customer', width: '220px',
-      render: (c: Customer) => (
+      render: (c: Row) => (
         <div className="flex items-center gap-3">
           <Avatar name={c.fullName} size="sm" />
           <div>
@@ -49,25 +54,25 @@ export default function CustomersPage() {
     },
     {
       key: 'phone', header: 'Phone',
-      render: (c: Customer) => (
+      render: (c: Row) => (
         <a href={`tel:${c.phoneNumber}`} className="text-sm font-mono hover:text-[#165B43]">{c.phoneNumber}</a>
       ),
     },
     {
       key: 'location', header: 'Location',
-      render: (c: Customer) => <span className="text-sm text-gray-600">{c.location.city || '—'}, {c.location.state || '—'}</span>,
+      render: (c: Row) => <span className="text-sm text-gray-600">{c.location?.city || '—'}, {c.location?.state || '—'}</span>,
     },
     {
       key: 'bookings', header: 'Bookings',
-      render: (c: Customer) => <span className="text-sm font-medium">{c.totalBookings}</span>,
+      render: (c: Row) => <span className="text-sm font-medium">{c.totalBookings ?? 0}</span>,
     },
     {
       key: 'wallet', header: 'Wallet',
-      render: (c: Customer) => <span className="text-sm font-semibold text-green-600">₦{c.walletBalance.toLocaleString()}</span>,
+      render: (c: Row) => <span className="text-sm font-semibold text-green-600">₦{(c.walletBalance ?? 0).toLocaleString()}</span>,
     },
     {
       key: 'verified', header: 'Verified',
-      render: (c: Customer) => (
+      render: (c: Row) => (
         <div className="flex gap-1">
           <Badge variant={c.isEmailVerified ? 'success' : 'warning'}>Email</Badge>
           <Badge variant={c.isPhoneVerified ? 'success' : 'warning'}>Phone</Badge>
@@ -76,7 +81,7 @@ export default function CustomersPage() {
     },
     {
       key: 'status', header: 'Status',
-      render: (c: Customer) => (
+      render: (c: Row) => (
         c.isBanned
           ? <Badge variant="danger"><Ban size={10} className="mr-1" />Banned</Badge>
           : <Badge variant="success"><CheckCircle size={10} className="mr-1" />Active</Badge>
@@ -84,7 +89,7 @@ export default function CustomersPage() {
     },
     {
       key: 'joined', header: 'Joined',
-      render: (c: Customer) => <span className="text-xs text-gray-500">{fmtDate(c.createdAt)}</span>,
+      render: (c: Row) => <span className="text-xs text-gray-500">{fmtDate(c.createdAt)}</span>,
     },
   ];
 
@@ -103,7 +108,7 @@ export default function CustomersPage() {
               }`}
             >
               {f.charAt(0).toUpperCase() + f.slice(1)}
-              {f === 'all' && <span className="ml-1 text-[10px] opacity-60">{customers.length}</span>}
+              {f === 'all' && <span className="ml-1 text-[10px] opacity-60">{total}</span>}
             </button>
           ))}
         </div>
@@ -114,15 +119,15 @@ export default function CustomersPage() {
       </div>
 
       <div className="mb-2">
-        <p className="text-xs text-gray-500">{filtered.length} customer{filtered.length !== 1 ? 's' : ''} found</p>
+        <p className="text-xs text-gray-500">{loading ? 'Loading...' : `${total} customer${total !== 1 ? 's' : ''} found`}</p>
       </div>
 
       <Table
         columns={columns}
         data={filtered}
-        rowKey={(c) => c.id}
-        onRowClick={(c) => navigate(`/customers/${c.id}`)}
-        emptyText="No customers found"
+        rowKey={(c) => c._id || c.id}
+        onRowClick={(c) => navigate(`/customers/${c._id || c.id}`)}
+        emptyText={loading ? 'Loading customers...' : 'No customers found'}
       />
     </Layout>
   );

@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!email.trim() || !password.trim()) {
@@ -22,15 +22,13 @@ export default function LoginPage() {
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      const ok = login(email.trim(), password);
-      if (ok) {
-        navigate('/dashboard', { replace: true });
-      } else {
-        setError('Invalid email or password. Please try again.');
-        setLoading(false);
-      }
-    }, 700);
+    const { ok, error: err } = await login(email.trim(), password);
+    if (ok) {
+      navigate('/dashboard', { replace: true });
+    } else {
+      setError(err || 'Invalid email or password. Please try again.');
+      setLoading(false);
+    }
   };
 
   return (
@@ -175,15 +173,7 @@ export default function LoginPage() {
               </button>
             </form>
 
-            {/* Demo hint */}
-            <div className="mt-5 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
-              <p className="text-xs text-gray-500 text-center">
-                Demo credentials&nbsp;·&nbsp;
-                <span className="font-mono font-semibold text-gray-700">admin@servenaija.ng</span>
-                &nbsp;/&nbsp;
-                <span className="font-mono font-semibold text-gray-700">admin123</span>
-              </p>
-            </div>
+            
           </div>
         </div>
       </div>

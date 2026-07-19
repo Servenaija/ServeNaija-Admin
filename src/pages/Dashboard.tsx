@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import Layout from '../components/Layout/Layout';
 import StatCard from '../components/UI/StatCard';
 import Card, { CardHeader, CardBody } from '../components/UI/Card';
@@ -11,13 +12,55 @@ import {
   Users, UserCheck, CalendarCheck, DollarSign, ShieldCheck, ShoppingBag,
   AlertTriangle, TrendingUp, Clock, CheckCircle2,
 } from 'lucide-react';
-import { mockDashboardStats, mockBookings, mockProviders } from '../data/mock';
+import { getDashboard, listBookings, listProviders } from '../services/api';
+import type { DashboardData } from '../services/api';
 
 const COLORS = ['#165B43', '#D6A643', '#ef4444', '#f97316'];
 const fmt = (n: number) => n >= 1000000 ? `₦${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `₦${(n / 1000).toFixed(0)}K` : `₦${n}`;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function DashboardPage() {
-  const s = mockDashboardStats;
+  const [stats, setStats] = useState<DashboardData | null>(null);
+  const [recentBookings, setRecentBookings] = useState<Row[]>([]);
+  const [topProviders, setTopProviders] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      getDashboard(),
+      listBookings({ limit: 4, page: 0 }),
+      listProviders({ limit: 5, page: 0 }),
+    ])
+      .then(([dashData, bookingsRes, providersRes]) => {
+        setStats(dashData);
+        setRecentBookings((bookingsRes.bookings as Row[]).slice(0, 4));
+        setTopProviders((providersRes.providers as Row[]).slice(0, 5));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <Layout title="Dashboard">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#165B43] border-t-transparent" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <Layout title="Dashboard">
+        <p className="text-gray-500 text-sm">Unable to load dashboard data. Make sure the API server is running.</p>
+      </Layout>
+    );
+  }
+
+  const s = stats;
 
   return (
     <Layout title="Dashboard">
@@ -133,12 +176,12 @@ export default function DashboardPage() {
           </CardHeader>
           <CardBody className="p-0">
             <div className="divide-y divide-gray-50">
-              {mockBookings.slice(0, 4).map((bk) => (
-                <div key={bk.id} className="flex items-center gap-3 px-5 py-3">
-                  <Avatar name={bk.customer.name} size="sm" />
+              {recentBookings.map((bk) => (
+                <div key={bk._id || bk.id} className="flex items-center gap-3 px-5 py-3">
+                  <Avatar name={bk.customer?.fullName || bk.customer?.name || '?'} size="sm" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{bk.customer.name}</p>
-                    <p className="text-xs text-gray-500 truncate">{bk.service.name} · {bk.provider.name}</p>
+                    <p className="text-sm font-medium text-gray-800 truncate">{bk.customer?.fullName || bk.customer?.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{bk.service?.name} · {bk.provider?.fullName || bk.provider?.name}</p>
                   </div>
                   <BookingStatusBadge status={bk.status} />
                 </div>
@@ -157,16 +200,16 @@ export default function DashboardPage() {
           </CardHeader>
           <CardBody className="p-0">
             <div className="divide-y divide-gray-50">
-              {mockProviders.filter(p => !p.isBanned).slice(0, 4).map((prov) => (
-                <div key={prov.id} className="flex items-center gap-3 px-5 py-3">
+              {topProviders.filter((p: Row) => !p.isBanned).slice(0, 4).map((prov: Row) => (
+                <div key={prov._id || prov.id} className="flex items-center gap-3 px-5 py-3">
                   <Avatar name={prov.fullName} size="sm" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-800 truncate">{prov.fullName}</p>
-                    <p className="text-xs text-gray-500 truncate">{prov.service.category} · {prov.location.city}</p>
+                    <p className="text-xs text-gray-500 truncate">{prov.service?.category} · {prov.location?.city}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs font-semibold text-[#D6A643]">★ {prov.rating}</p>
-                    <p className="text-xs text-gray-400">{prov.totalJobs} jobs</p>
+                    <p className="text-xs font-semibold text-[#D6A643]">★ {prov.rating ?? '—'}</p>
+                    <p className="text-xs text-gray-400">{prov.totalJobs ?? 0} jobs</p>
                   </div>
                 </div>
               ))}
@@ -183,7 +226,7 @@ export default function DashboardPage() {
             <p className="text-xs font-semibold text-gray-600">KYC Approved</p>
           </div>
           <p className="text-xl font-bold text-gray-800">
-            {mockDashboardStats.totalProviders - mockDashboardStats.pendingKYC - mockDashboardStats.bannedProviders}
+            {Math.max(0, s.totalProviders - s.pendingKYC)}
           </p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -191,21 +234,21 @@ export default function DashboardPage() {
             <Clock size={16} className="text-yellow-500" />
             <p className="text-xs font-semibold text-gray-600">KYC Pending</p>
           </div>
-          <p className="text-xl font-bold text-gray-800">{mockDashboardStats.pendingKYC}</p>
+          <p className="text-xl font-bold text-gray-800">{s.pendingKYC}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle size={16} className="text-orange-500" />
-            <p className="text-xs font-semibold text-gray-600">Banned Users</p>
+            <p className="text-xs font-semibold text-gray-600">Disputed</p>
           </div>
-          <p className="text-xl font-bold text-gray-800">{mockDashboardStats.bannedProviders + mockDashboardStats.bannedCustomers}</p>
+          <p className="text-xl font-bold text-gray-800">{s.disputedBookings}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-2">
             <DollarSign size={16} className="text-blue-500" />
-            <p className="text-xs font-semibold text-gray-600">Transactions</p>
+            <p className="text-xs font-semibold text-gray-600">Today's Bookings</p>
           </div>
-          <p className="text-xl font-bold text-gray-800">{mockDashboardStats.totalTransactions}</p>
+          <p className="text-xl font-bold text-gray-800">{s.todayBookings}</p>
         </div>
       </div>
     </Layout>

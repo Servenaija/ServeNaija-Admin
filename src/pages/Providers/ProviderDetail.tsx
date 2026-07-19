@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
@@ -6,8 +6,10 @@ import { Badge, KYCStatusBadge, BookingStatusBadge } from '../../components/UI/B
 import Button from '../../components/UI/Button';
 import Avatar from '../../components/UI/Avatar';
 import ConfirmDialog from '../../components/UI/ConfirmDialog';
-import { useApp } from '../../context/AppContext';
-import { mockBookings, mockServices, mockTransactions } from '../../data/mock';
+import {
+  getProvider, banProvider, getProviderBookings,
+  getProviderServices, getProviderTransactions,
+} from '../../services/api';
 import {
   Phone, Mail, MapPin, Shield, Star, Briefcase, Building2,
   CreditCard, Ban, CheckCircle, MessageSquare, ArrowLeft, ExternalLink,
@@ -16,14 +18,61 @@ import {
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 const fmtCurrency = (n: number) => `₦${n.toLocaleString()}`;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function ProviderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { providers, setProviders } = useApp();
 
-  const provider = providers.find((p) => p.id === id);
+  const [provider, setProvider] = useState<Row | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [providerBookings, setProviderBookings] = useState<Row[]>([]);
+  const [providerServices, setProviderServices] = useState<Row[]>([]);
+  const [providerTxns, setProviderTxns] = useState<Row[]>([]);
   const [tab, setTab] = useState<'overview' | 'bookings' | 'services' | 'transactions' | 'kyc'>('overview');
   const [showBanConfirm, setShowBanConfirm] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    getProvider(id)
+      .then((res) => setProvider(res.provider))
+      .catch(() => setProvider(null))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    if (tab === 'bookings') {
+      getProviderBookings(id, { limit: 50 }).then((r) => setProviderBookings(r.bookings as Row[])).catch(() => {});
+    } else if (tab === 'services') {
+      getProviderServices(id).then((r) => setProviderServices(r.services as Row[])).catch(() => {});
+    } else if (tab === 'transactions') {
+      getProviderTransactions(id, { limit: 50 }).then((r) => setProviderTxns(r.transactions as Row[])).catch(() => {});
+    }
+  }, [id, tab]);
+
+  const handleBanToggle = async () => {
+    if (!id) return;
+    try {
+      const res = await banProvider(id);
+      setProvider((prev: Row) => prev ? { ...prev, isBanned: res.isBanned } : prev);
+    } catch { /* ignore */ }
+    setShowBanConfirm(false);
+  };
+
+  const tabs = ['overview', 'bookings', 'services', 'transactions', 'kyc'] as const;
+
+  if (loading) {
+    return (
+      <Layout title="Loading...">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#165B43] border-t-transparent" />
+        </div>
+      </Layout>
+    );
+  }
 
   if (!provider) {
     return (
@@ -33,17 +82,6 @@ export default function ProviderDetail() {
       </Layout>
     );
   }
-
-  const providerBookings = mockBookings.filter(b => b.provider.id === id);
-  const providerServices = mockServices.filter(s => s.providerId === id);
-  const providerTxns = mockTransactions.filter(t => t.owner === id);
-
-  const handleBanToggle = () => {
-    setProviders(prev => prev.map(p => p.id === id ? { ...p, isBanned: !p.isBanned } : p));
-    setShowBanConfirm(false);
-  };
-
-  const tabs = ['overview', 'bookings', 'services', 'transactions', 'kyc'] as const;
 
   return (
     <Layout title={provider.fullName}>
@@ -80,7 +118,7 @@ export default function ProviderDetail() {
                 <h2 className="text-xl font-bold text-gray-800">{provider.fullName}</h2>
                 {provider.isBanned && <Badge variant="danger"><Ban size={10} />Banned</Badge>}
                 <Badge variant={provider.accountType === 'business' ? 'gold' : 'info'}>{provider.accountType}</Badge>
-                <KYCStatusBadge status={provider.kyc.status} />
+                <KYCStatusBadge status={provider.kyc?.status || 'not_started'} />
               </div>
               <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-3">
                 <a href={`mailto:${provider.email}`} className="flex items-center gap-1 hover:text-[#165B43]">
@@ -140,12 +178,12 @@ export default function ProviderDetail() {
           <Card>
             <CardHeader><p className="font-semibold text-sm flex items-center gap-2"><Briefcase size={15} />Service Info</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="Category" value={provider.service.category || '—'} />
-              <Row label="Experience" value={provider.service.experience || '—'} />
-              {provider.service.businessName && <Row label="Business Name" value={provider.service.businessName} />}
-              <Row label="Description" value={provider.service.description || '—'} />
-              <Row label="Service Radius" value={provider.location.radius} />
-              <Row label="Travel Outside Area" value={provider.location.travelOutsideArea ? 'Yes' : 'No'} />
+              <InfoRow label="Category" value={provider.service?.category || '—'} />
+              <InfoRow label="Experience" value={provider.service?.experience || '—'} />
+              {provider.service?.businessName && <InfoRow label="Business Name" value={provider.service.businessName} />}
+              <InfoRow label="Description" value={provider.service?.description || '—'} />
+              <InfoRow label="Service Radius" value={provider.location?.radius || '—'} />
+              <InfoRow label="Travel Outside Area" value={provider.location?.travelOutsideArea ? 'Yes' : 'No'} />
             </CardBody>
           </Card>
 
@@ -153,10 +191,10 @@ export default function ProviderDetail() {
           <Card>
             <CardHeader><p className="font-semibold text-sm flex items-center gap-2"><CreditCard size={15} />Bank Details</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="Account Name" value={provider.bankDetails.accountName || '—'} />
-              <Row label="Bank Name" value={provider.bankDetails.bankName || '—'} />
-              <Row label="Account Number" value={provider.bankDetails.accountNumber || '—'} />
-              <Row label="Verified" value={provider.bankDetails.isVerified ? '✓ Verified' : 'Not Verified'} />
+              <InfoRow label="Account Name" value={provider.bankDetails?.accountName || '—'} />
+              <InfoRow label="Bank Name" value={provider.bankDetails?.bankName || '—'} />
+              <InfoRow label="Account Number" value={provider.bankDetails?.accountNumber || '—'} />
+              <InfoRow label="Verified" value={provider.bankDetails?.isVerified ? '✓ Verified' : 'Not Verified'} />
             </CardBody>
           </Card>
 
@@ -164,10 +202,10 @@ export default function ProviderDetail() {
           <Card>
             <CardHeader><p className="font-semibold text-sm flex items-center gap-2"><MapPin size={15} />Location</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="State" value={provider.location.state || '—'} />
-              <Row label="City" value={provider.location.city || '—'} />
-              <Row label="Area" value={provider.location.area || '—'} />
-              <Row label="Address" value={provider.location.address || '—'} />
+              <InfoRow label="State" value={provider.location?.state || '—'} />
+              <InfoRow label="City" value={provider.location?.city || '—'} />
+              <InfoRow label="Area" value={provider.location?.area || '—'} />
+              <InfoRow label="Address" value={provider.location?.address || '—'} />
             </CardBody>
           </Card>
 
@@ -175,11 +213,11 @@ export default function ProviderDetail() {
           <Card>
             <CardHeader><p className="font-semibold text-sm flex items-center gap-2"><Shield size={15} />Account Status</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="Email Verified" value={provider.isEmailVerified ? '✓ Yes' : '✗ No'} />
-              <Row label="Phone Verified" value={provider.isPhoneVerified ? '✓ Yes' : '✗ No'} />
-              <Row label="Available" value={provider.isAvailable ? 'Online' : 'Offline'} />
-              <Row label="Last Login" value={provider.lastLogin ? fmtDate(provider.lastLogin) : '—'} />
-              <Row label="Referral Code" value={provider.referralCode || '—'} />
+              <InfoRow label="Email Verified" value={provider.isEmailVerified ? '✓ Yes' : '✗ No'} />
+              <InfoRow label="Phone Verified" value={provider.isPhoneVerified ? '✓ Yes' : '✗ No'} />
+              <InfoRow label="Available" value={provider.isAvailable ? 'Online' : 'Offline'} />
+              <InfoRow label="Last Login" value={provider.lastLogin ? fmtDate(provider.lastLogin) : '—'} />
+              <InfoRow label="Referral Code" value={provider.referralCode || '—'} />
             </CardBody>
           </Card>
 
@@ -188,12 +226,12 @@ export default function ProviderDetail() {
             <Card className="lg:col-span-2">
               <CardHeader><p className="font-semibold text-sm flex items-center gap-2"><Building2 size={15} />Business Info</p></CardHeader>
               <CardBody className="grid grid-cols-2 gap-3">
-                <Row label="Registration No." value={provider.business.registrationNumber || '—'} />
-                <Row label="Owner Name" value={provider.business.ownerFullName || '—'} />
-                <Row label="Business Email" value={provider.business.businessEmail || '—'} />
-                <Row label="Contact Phone" value={provider.business.contactPhone || '—'} />
-                <Row label="Staff Size" value={provider.business.staffSize || '—'} />
-                <Row label="Landmark" value={provider.business.landmark || '—'} />
+                <InfoRow label="Registration No." value={provider.business?.registrationNumber || '—'} />
+                <InfoRow label="Owner Name" value={provider.business?.ownerFullName || '—'} />
+                <InfoRow label="Business Email" value={provider.business?.businessEmail || '—'} />
+                <InfoRow label="Contact Phone" value={provider.business?.contactPhone || '—'} />
+                <InfoRow label="Staff Size" value={provider.business?.staffSize || '—'} />
+                <InfoRow label="Landmark" value={provider.business?.landmark || '—'} />
               </CardBody>
             </Card>
           )}
@@ -210,15 +248,15 @@ export default function ProviderDetail() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {providerBookings.map((bk) => (
-                  <div key={bk.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/bookings/${bk.id}`)}>
-                    <Avatar name={bk.customer.name} size="sm" />
+                  <div key={bk._id || bk.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/bookings/${bk._id || bk.id}`)}>
+                    <Avatar name={bk.customer?.fullName || bk.customer?.name || '?'} size="sm" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800">{bk.service.name}</p>
-                      <p className="text-xs text-gray-500">Customer: {bk.customer.name} · {fmtDate(bk.createdAt)}</p>
+                      <p className="text-sm font-medium text-gray-800">{bk.service?.name}</p>
+                      <p className="text-xs text-gray-500">Customer: {bk.customer?.fullName || bk.customer?.name} · {fmtDate(bk.createdAt)}</p>
                     </div>
                     <div className="text-right">
                       <BookingStatusBadge status={bk.status} />
-                      <p className="text-xs text-gray-500 mt-0.5">₦{bk.totalAmount.toLocaleString()}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">₦{(bk.totalAmount || 0).toLocaleString()}</p>
                     </div>
                   </div>
                 ))}
@@ -238,13 +276,13 @@ export default function ProviderDetail() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {providerServices.map((svc) => (
-                  <div key={svc.id} className="flex items-center justify-between px-5 py-3">
+                  <div key={svc._id || svc.id} className="flex items-center justify-between px-5 py-3">
                     <div>
                       <p className="text-sm font-medium text-gray-800">{svc.name}</p>
                       <p className="text-xs text-gray-500">{svc.description} · {svc.duration}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-semibold text-[#165B43]">₦{svc.price.toLocaleString()}</p>
+                      <p className="text-sm font-semibold text-[#165B43]">₦{(svc.price || 0).toLocaleString()}</p>
                       <Badge variant={svc.isActive ? 'success' : 'default'}>{svc.isActive ? 'Active' : 'Inactive'}</Badge>
                     </div>
                   </div>
@@ -265,14 +303,14 @@ export default function ProviderDetail() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {providerTxns.map((txn) => (
-                  <div key={txn.id} className="flex items-center justify-between px-5 py-3">
+                  <div key={txn._id || txn.id} className="flex items-center justify-between px-5 py-3">
                     <div>
-                      <p className="text-sm font-medium text-gray-800 capitalize">{txn.type.replace(/_/g, ' ')}</p>
+                      <p className="text-sm font-medium text-gray-800 capitalize">{(txn.type || '').replace(/_/g, ' ')}</p>
                       <p className="text-xs text-gray-500">{txn.description}</p>
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-semibold ${txn.type === 'debit' || txn.type === 'withdrawal' || txn.type === 'escrow_hold' ? 'text-red-500' : 'text-green-600'}`}>
-                        {txn.type === 'debit' || txn.type === 'withdrawal' || txn.type === 'escrow_hold' ? '-' : '+'}₦{txn.amount.toLocaleString()}
+                        {txn.type === 'debit' || txn.type === 'withdrawal' || txn.type === 'escrow_hold' ? '-' : '+'}₦{(txn.amount || 0).toLocaleString()}
                       </p>
                       <p className="text-xs text-gray-400">{fmtDate(txn.createdAt)}</p>
                     </div>
@@ -290,18 +328,18 @@ export default function ProviderDetail() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <p className="font-semibold text-sm">KYC Verification</p>
-              <KYCStatusBadge status={provider.kyc.status} />
+              <KYCStatusBadge status={provider.kyc?.status || 'not_started'} />
             </div>
           </CardHeader>
           <CardBody>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="space-y-3">
-                <Row label="Status" value={provider.kyc.status.replace(/_/g, ' ')} />
-                <Row label="Reviewed At" value={provider.kyc.reviewedAt ? fmtDate(provider.kyc.reviewedAt) : '—'} />
-                {provider.kyc.rejectionReason && <Row label="Rejection Reason" value={provider.kyc.rejectionReason} />}
+              <InfoRow label="Status" value={(provider.kyc?.status || 'not_started').replace(/_/g, ' ')} />
+              <InfoRow label="Reviewed At" value={provider.kyc?.reviewedAt ? fmtDate(provider.kyc.reviewedAt) : '—'} />
+              {provider.kyc?.rejectionReason && <InfoRow label="Rejection Reason" value={provider.kyc.rejectionReason} />}
               </div>
               <div className="space-y-3">
-                {provider.kyc.documentUrl && (
+                {provider.kyc?.documentUrl && (
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Document</p>
                     <a href={provider.kyc.documentUrl} target="_blank" rel="noreferrer"
@@ -310,7 +348,7 @@ export default function ProviderDetail() {
                     </a>
                   </div>
                 )}
-                {provider.kyc.selfieUrl && (
+                {provider.kyc?.selfieUrl && (
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Selfie</p>
                     <a href={provider.kyc.selfieUrl} target="_blank" rel="noreferrer"
@@ -321,7 +359,7 @@ export default function ProviderDetail() {
                 )}
               </div>
             </div>
-            {(provider.kyc.status === 'pending' || provider.kyc.status === 'submitted') && (
+            {(provider.kyc?.status === 'pending' || provider.kyc?.status === 'submitted') && (
               <div className="flex gap-3 mt-5 pt-5 border-t border-gray-100">
                 <Button variant="primary" size="sm" icon={<Star size={14} />}>Approve KYC</Button>
                 <Button variant="danger" size="sm">Reject KYC</Button>
@@ -346,7 +384,7 @@ export default function ProviderDetail() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between items-start gap-3">
       <span className="text-xs text-gray-500 flex-shrink-0 w-32">{label}</span>

@@ -1,18 +1,46 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
 import { BookingStatusBadge, PaymentStatusBadge } from '../../components/UI/Badge';
 import Button from '../../components/UI/Button';
 import Avatar from '../../components/UI/Avatar';
-import { mockBookings } from '../../data/mock';
+import { getBooking } from '../../services/api';
 import { ArrowLeft, Phone, MapPin, MessageSquare, Clock, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 
 const fmtDate = (d: string) => new Date(d).toLocaleString('en-NG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function BookingDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const booking = mockBookings.find((b) => b.id === id);
+  const [booking, setBooking] = useState<Row | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    getBooking(id)
+      .then((res) => setBooking(res.booking))
+      .catch(() => setBooking(null))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  const timelineIcons: Record<string, React.ElementType> = {
+    pending: Clock, accepted: CheckCircle2, completed: CheckCircle2,
+    cancelled: XCircle, disputed: AlertTriangle,
+  };
+
+  if (loading) {
+    return (
+      <Layout title="Loading...">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#165B43] border-t-transparent" />
+        </div>
+      </Layout>
+    );
+  }
 
   if (!booking) {
     return (
@@ -23,13 +51,10 @@ export default function BookingDetail() {
     );
   }
 
-  const timelineIcons: Record<string, React.ElementType> = {
-    pending: Clock, accepted: CheckCircle2, completed: CheckCircle2,
-    cancelled: XCircle, disputed: AlertTriangle,
-  };
+  const bookingId = booking._id || booking.id;
 
   return (
-    <Layout title={`Booking ${booking.id}`}>
+    <Layout title={`Booking ${String(bookingId).slice(-8)}`}>
       <div className="flex items-center justify-between mb-5">
         <Button variant="ghost" size="sm" icon={<ArrowLeft size={14} />} onClick={() => navigate('/bookings')}>
           Back to Bookings
@@ -51,33 +76,31 @@ export default function BookingDetail() {
                 <div>
                   <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-semibold">Customer</p>
                   <div className="flex items-center gap-3 mb-3">
-                    <Avatar name={booking.customer.name} size="md" />
+                    <Avatar name={booking.customer?.fullName || booking.customer?.name || '?'} size="md" />
                     <div>
-                      <p className="font-semibold text-gray-800">{booking.customer.name}</p>
-                      <a href={`tel:${booking.customer.phone}`} className="flex items-center gap-1 text-sm text-[#165B43] hover:underline font-mono">
-                        <Phone size={12} />{booking.customer.phone}
+                      <p className="font-semibold text-gray-800">{booking.customer?.fullName || booking.customer?.name}</p>
+                      <a href={`tel:${booking.customer?.phoneNumber || booking.customer?.phone}`} className="flex items-center gap-1 text-sm text-[#165B43] hover:underline font-mono">
+                        <Phone size={12} />{booking.customer?.phoneNumber || booking.customer?.phone}
                       </a>
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" variant="secondary" icon={<MessageSquare size={12} />} onClick={() => navigate('/chat')}>Message</Button>
-                    <Button size="sm" variant="secondary" icon={<Phone size={12} />}><a href={`tel:${booking.customer.phone}`}>Call</a></Button>
                   </div>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-semibold">Provider</p>
                   <div className="flex items-center gap-3 mb-3">
-                    <Avatar name={booking.provider.name} size="md" />
+                    <Avatar name={booking.provider?.fullName || booking.provider?.name || '?'} size="md" />
                     <div>
-                      <p className="font-semibold text-gray-800">{booking.provider.name}</p>
-                      <a href={`tel:${booking.provider.phone}`} className="flex items-center gap-1 text-sm text-[#165B43] hover:underline font-mono">
-                        <Phone size={12} />{booking.provider.phone}
+                      <p className="font-semibold text-gray-800">{booking.provider?.fullName || booking.provider?.name}</p>
+                      <a href={`tel:${booking.provider?.phoneNumber || booking.provider?.phone}`} className="flex items-center gap-1 text-sm text-[#165B43] hover:underline font-mono">
+                        <Phone size={12} />{booking.provider?.phoneNumber || booking.provider?.phone}
                       </a>
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" variant="secondary" icon={<MessageSquare size={12} />} onClick={() => navigate('/chat')}>Message</Button>
-                    <Button size="sm" variant="secondary" icon={<Phone size={12} />}><a href={`tel:${booking.provider.phone}`}>Call</a></Button>
                   </div>
                 </div>
               </div>
@@ -88,14 +111,14 @@ export default function BookingDetail() {
           <Card>
             <CardHeader><p className="font-semibold text-sm">Service Details</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="Service" value={booking.service.name} />
-              <Row label="Category" value={booking.service.category} />
-              <Row label="Description" value={booking.description || '—'} />
-              <Row label="Scheduled Date" value={fmtDate(booking.scheduledDate)} />
-              <Row label="Time Slot" value={booking.timeSlot || '—'} />
+              <InfoRow label="Service" value={booking.service?.name || '—'} />
+              <InfoRow label="Category" value={booking.service?.category || '—'} />
+              <InfoRow label="Description" value={booking.description || '—'} />
+              <InfoRow label="Scheduled Date" value={booking.scheduledDate ? fmtDate(booking.scheduledDate) : '—'} />
+              <InfoRow label="Time Slot" value={booking.timeSlot || '—'} />
               <div className="flex items-start gap-3">
                 <span className="text-xs text-gray-500 w-32 flex-shrink-0 flex items-center gap-1"><MapPin size={11} />Address</span>
-                <span className="text-sm text-gray-800">{booking.address.full}</span>
+                <span className="text-sm text-gray-800">{booking.address?.full || booking.address?.address || '—'}</span>
               </div>
             </CardBody>
           </Card>
@@ -104,13 +127,13 @@ export default function BookingDetail() {
           <Card>
             <CardHeader><p className="font-semibold text-sm">Payment</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="Service Fee" value={`₦${booking.serviceFee.toLocaleString()}`} />
-              <Row label="Platform Fee" value={`₦${booking.platformFee.toLocaleString()}`} />
+              <InfoRow label="Service Fee" value={`₦${(booking.serviceFee || 0).toLocaleString()}`} />
+              <InfoRow label="Platform Fee" value={`₦${(booking.platformFee || 0).toLocaleString()}`} />
               <div className="border-t border-gray-100 pt-3">
-                <Row label="Total Amount" value={`₦${booking.totalAmount.toLocaleString()}`} />
+                <InfoRow label="Total Amount" value={`₦${(booking.totalAmount || 0).toLocaleString()}`} />
               </div>
-              <Row label="Payment Status" value={booking.paymentStatus} />
-              <Row label="Paystack Ref" value={booking.paystackReference} />
+              <InfoRow label="Payment Status" value={booking.paymentStatus || '—'} />
+              <InfoRow label="Paystack Ref" value={booking.paystackReference || '—'} />
             </CardBody>
           </Card>
 
@@ -127,7 +150,7 @@ export default function BookingDetail() {
                   {(['quality', 'punctuality', 'professionalism', 'communication'] as const).map((cat) => (
                     <div key={cat} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
                       <span className="text-xs text-gray-600 capitalize">{cat}</span>
-                      <span className="text-xs font-semibold text-[#D6A643]">★ {booking.rating![cat]}</span>
+                      <span className="text-xs font-semibold text-[#D6A643]">★ {booking.rating[cat]}</span>
                     </div>
                   ))}
                 </div>
@@ -166,7 +189,7 @@ export default function BookingDetail() {
             <CardHeader><p className="font-semibold text-sm">Timeline</p></CardHeader>
             <CardBody className="p-4">
               <div className="space-y-0">
-                {booking.timeline.map((entry, idx) => {
+                {(booking.timeline || []).map((entry: Row, idx: number) => {
                   const Icon = timelineIcons[entry.status] || Clock;
                   return (
                     <div key={idx} className="flex gap-3">
@@ -175,12 +198,12 @@ export default function BookingDetail() {
                           style={{ backgroundColor: '#165B4320' }}>
                           <Icon size={13} className="text-[#165B43]" />
                         </div>
-                        {idx < booking.timeline.length - 1 && (
+                        {idx < (booking.timeline || []).length - 1 && (
                           <div className="w-0.5 flex-1 bg-gray-200 my-1" style={{ minHeight: 16 }} />
                         )}
                       </div>
                       <div className="pb-4">
-                        <p className="text-sm font-medium capitalize text-gray-800">{entry.status.replace(/-/g, ' ')}</p>
+                        <p className="text-sm font-medium capitalize text-gray-800">{(entry.status || '').replace(/-/g, ' ')}</p>
                         <p className="text-xs text-gray-500">{entry.note}</p>
                         <p className="text-xs text-gray-400 mt-0.5">{fmtDate(entry.timestamp)}</p>
                       </div>
@@ -196,7 +219,7 @@ export default function BookingDetail() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between items-start gap-3">
       <span className="text-xs text-gray-500 flex-shrink-0 w-32">{label}</span>

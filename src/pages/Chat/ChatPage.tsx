@@ -1,9 +1,13 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout/Layout';
 import Avatar from '../../components/UI/Avatar';
 import Button from '../../components/UI/Button';
 import { useApp } from '../../context/AppContext';
-import type { Conversation, Message } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import {
+  listConversations, createOrGetConversation,
+  listMessages, sendChatMessage,
+} from '../../services/api';
 import {
   Send, Phone, Plus, Search, MessageSquare, Image, CheckCheck, Check,
 } from 'lucide-react';
@@ -18,109 +22,105 @@ const fmtConvDate = (d: string) => {
   return date.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
 };
 
-const ADMIN_ID = 'admin';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Conv = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Msg = any;
 
 export default function ChatPage() {
-  const { conversations, setConversations, messages, setMessages, providers, customers } = useApp();
-  const [activeConvId, setActiveConvId] = useState<string | null>(conversations[0]?.id ?? null);
+  const { providers, customers } = useApp();
+  const { admin } = useAuth();
+  const adminId = (admin as any)?._id || (admin as any)?.id || '';
+
+  const [conversations, setConversations] = useState<Conv[]>([]);
+  const [messages, setMessages] = useState<Record<string, Msg[]>>({});
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [showNewChat, setShowNewChat] = useState(false);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const activeConv = conversations.find((c) => c.id === activeConvId);
+  const activeConv = conversations.find((c) => (c._id || c.id) === activeConvId);
   const activeMessages = activeConvId ? (messages[activeConvId] ?? []) : [];
 
   const filteredConvs = conversations.filter((c) => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return c.participants.some((p) => p.name.toLowerCase().includes(q));
+    return c.participants.some((p: Conv) => p.name.toLowerCase().includes(q));
   });
+
+  // Fetch conversations on mount
+  useEffect(() => {
+    listConversations()
+      .then((res) => {
+        const convs = (res.conversations || []) as Conv[];
+        setConversations(convs);
+        if (convs.length > 0) setActiveConvId(convs[0]._id || convs[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Fetch messages when active conversation changes
+  const loadMessages = useCallback(async (convId: string) => {
+    if (messages[convId]) return; // already loaded
+    setLoadingMsgs(true);
+    try {
+      const res = await listMessages(convId, { limit: 50 });
+      setMessages((prev) => ({ ...prev, [convId]: (res.messages || []) as Msg[] }));
+    } catch { /* ignore */ }
+    setLoadingMsgs(false);
+  }, [messages]);
+
+  useEffect(() => {
+    if (activeConvId) loadMessages(activeConvId);
+  }, [activeConvId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConvId, activeMessages.length]);
 
-  const getOtherParticipant = (conv: Conversation) =>
-    conv.participants.find((p) => p.userId !== ADMIN_ID) ?? conv.participants[0];
+  const getOtherParticipant = (conv: Conv) =>
+    conv.participants.find((p: Conv) => p.userId !== adminId) ?? conv.participants[0];
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim() || !activeConvId) return;
-
-    const newMsg: Message = {
-      id: `msg-${Date.now()}`,
-      conversationId: activeConvId,
-      senderId: ADMIN_ID,
-      senderType: 'admin',
-      senderName: 'Admin',
-      senderAvatar: null,
-      text: input.trim(),
-      imageUrl: null,
-      type: 'text',
-      readBy: [],
-      deletedAt: null,
-      createdAt: new Date().toISOString(),
-    };
-
-    setMessages((prev) => ({
-      ...prev,
-      [activeConvId]: [...(prev[activeConvId] ?? []), newMsg],
-    }));
-
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeConvId
-          ? {
-              ...c,
-              lastMessage: {
-                text: input.trim(), imageUrl: null,
-                senderId: ADMIN_ID, senderType: 'admin',
-                timestamp: new Date().toISOString(),
-              },
-              updatedAt: new Date().toISOString(),
-            }
-          : c
-      )
-    );
+    const text = input.trim();
     setInput('');
+    try {
+      const res = await sendChatMessage(activeConvId, { text, type: 'text' });
+      const newMsg = res.message as Msg;
+      setMessages((prev) => ({
+        ...prev,
+        [activeConvId]: [...(prev[activeConvId] ?? []), newMsg],
+      }));
+      setConversations((prev) =>
+        prev.map((c) =>
+          (c._id || c.id) === activeConvId
+            ? { ...c, lastMessage: { text, imageUrl: null, senderId: adminId, senderType: 'admin', timestamp: new Date().toISOString() }, updatedAt: new Date().toISOString() }
+            : c
+        )
+      );
+    } catch { /* ignore */ }
   };
 
-  const startNewConversation = (userId: string, userType: 'provider' | 'customer', userName: string) => {
-    // Check if conversation already exists
-    const existing = conversations.find((c) =>
-      c.participants.some((p) => p.userId === userId) &&
-      c.participants.some((p) => p.userId === ADMIN_ID)
-    );
-    if (existing) {
-      setActiveConvId(existing.id);
+  const startNewConversation = async (userId: string, userType: 'provider' | 'customer') => {
+    try {
+      const res = await createOrGetConversation(userId, userType);
+      const conv = res.conversation as Conv;
+      const convId = conv._id || conv.id;
+      setConversations((prev) => {
+        const exists = prev.find((c) => (c._id || c.id) === convId);
+        return exists ? prev : [conv, ...prev];
+      });
+      setActiveConvId(convId);
       setShowNewChat(false);
-      return;
-    }
-
-    const newConvId = `conv-${Date.now()}`;
-    const newConv: Conversation = {
-      id: newConvId,
-      participants: [
-        { userId: ADMIN_ID, actorType: 'admin', name: 'Admin', avatar: null },
-        { userId, actorType: userType, name: userName, avatar: null },
-      ],
-      lastMessage: null,
-      unreadCounts: {},
-      bookingId: null,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setConversations((prev) => [newConv, ...prev]);
-    setMessages((prev) => ({ ...prev, [newConvId]: [] }));
-    setActiveConvId(newConvId);
-    setShowNewChat(false);
+    } catch { /* ignore */ }
   };
 
   const allUsers = [
-    ...providers.map((p) => ({ id: p.id, name: p.fullName, type: 'provider' as const, sub: p.service.category, phone: p.phoneNumber })),
-    ...customers.map((c) => ({ id: c.id, name: c.fullName, type: 'customer' as const, sub: c.location.city || 'Customer', phone: c.phoneNumber })),
+    ...providers.map((p: Conv) => ({ id: p._id || p.id, name: p.fullName, type: 'provider' as const, sub: p.service?.category || 'Provider', phone: p.phoneNumber })),
+    ...customers.map((c: Conv) => ({ id: c._id || c.id, name: c.fullName, type: 'customer' as const, sub: c.location?.city || 'Customer', phone: c.phoneNumber })),
   ];
 
   return (
@@ -148,7 +148,7 @@ export default function ChatPage() {
                   {allUsers.map((u) => (
                     <button
                       key={u.id}
-                      onClick={() => startNewConversation(u.id, u.type, u.name)}
+                      onClick={() => startNewConversation(u.id, u.type)}
                       className="flex items-center gap-2 w-full p-2 rounded-lg hover:bg-white transition-colors text-left"
                     >
                       <Avatar name={u.name} size="sm" />
@@ -183,12 +183,13 @@ export default function ChatPage() {
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
                 .map((conv) => {
                   const other = getOtherParticipant(conv);
-                  const unread = conv.unreadCounts[ADMIN_ID] ?? 0;
-                  const isActive = conv.id === activeConvId;
+                  const convId = conv._id || conv.id;
+                  const unread = (conv.unreadCounts instanceof Map ? conv.unreadCounts.get(adminId) : conv.unreadCounts?.[adminId]) ?? 0;
+                  const isActive = convId === activeConvId;
                   return (
                     <button
-                      key={conv.id}
-                      onClick={() => setActiveConvId(conv.id)}
+                      key={convId}
+                      onClick={() => setActiveConvId(convId)}
                       className={`flex items-start gap-3 w-full px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 text-left ${isActive ? 'bg-[#165B43]/5 border-l-2 border-l-[#165B43]' : ''}`}
                     >
                       <div className="relative">
@@ -233,8 +234,8 @@ export default function ChatPage() {
             {(() => {
               const other = getOtherParticipant(activeConv);
               const userDetail = other.actorType === 'provider'
-                ? providers.find((p) => p.id === other.userId)
-                : customers.find((c) => c.id === other.userId);
+                ? providers.find((p: Conv) => (p._id || p.id) === other.userId)
+                : customers.find((c: Conv) => (c._id || c.id) === other.userId);
               const phone = userDetail?.phoneNumber;
 
               return (
@@ -266,16 +267,18 @@ export default function ChatPage() {
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-gray-50">
-              {activeMessages.length === 0 ? (
+              {loadingMsgs ? (
+                <div className="flex items-center justify-center h-full text-gray-400 text-sm">Loading messages...</div>
+              ) : activeMessages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-gray-400">
                   <MessageSquare size={40} className="mb-2 opacity-20" />
                   <p className="text-sm">No messages yet. Start the conversation.</p>
                 </div>
               ) : (
                 activeMessages.map((msg) => {
-                  const isAdmin = msg.senderId === ADMIN_ID;
+                  const isAdmin = msg.senderId === adminId || msg.senderType === 'admin';
                   return (
-                    <div key={msg.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
+                    <div key={msg._id || msg.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
                       {!isAdmin && (
                         <Avatar name={msg.senderName} size="sm" />
                       )}

@@ -2,17 +2,20 @@ import { useState } from 'react';
 import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
-import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
+import { updateMe, changePassword } from '../../services/api';
 import { Save, CheckCircle, Eye, EyeOff, Shield, Settings2, DollarSign, Bell } from 'lucide-react';
 
 export default function SettingsPage() {
-  const { adminName, adminEmail } = useApp();
+  const { admin } = useAuth();
   const [tab, setTab] = useState<'profile' | 'platform' | 'fees' | 'security'>('profile');
 
-  const [profile, setProfile] = useState({ name: adminName, email: adminEmail, phone: '+234 901 234 5678' });
+  const [profile, setProfile] = useState({ name: admin?.fullName || '', email: admin?.email || '', phone: admin?.phone || '' });
   const [password, setPassword] = useState({ current: '', newPass: '', confirm: '' });
   const [showPw, setShowPw] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [pwSaved, setPwSaved] = useState(false);
+  const [pwError, setPwError] = useState('');
 
   const [fees, setFees] = useState({
     platformFee: 500,
@@ -32,9 +35,33 @@ export default function SettingsPage() {
     supportPhone: '+234 800 SERVE NAIJA',
   });
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const handleSave = async () => {
+    try {
+      await updateMe({ fullName: profile.name, email: profile.email, phone: profile.phone });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch { /* ignore */ }
+  };
+
+  const handlePasswordChange = async () => {
+    setPwError('');
+    if (!password.current || !password.newPass || !password.confirm) {
+      setPwError('All fields are required.'); return;
+    }
+    if (password.newPass !== password.confirm) {
+      setPwError('New passwords do not match.'); return;
+    }
+    if (password.newPass.length < 8) {
+      setPwError('New password must be at least 8 characters.'); return;
+    }
+    try {
+      await changePassword(password.current, password.newPass);
+      setPwSaved(true);
+      setPassword({ current: '', newPass: '', confirm: '' });
+      setTimeout(() => setPwSaved(false), 2000);
+    } catch (err: unknown) {
+      setPwError(err instanceof Error ? err.message : 'Failed to change password.');
+    }
   };
 
   const tabs = ['profile', 'platform', 'fees', 'security'] as const;
@@ -231,16 +258,17 @@ export default function SettingsPage() {
                   </div>
                 </div>
               ))}
+              {pwError && <p className="text-xs text-red-500">{pwError}</p>}
               {password.newPass && password.confirm && password.newPass !== password.confirm && (
                 <p className="text-xs text-red-500">Passwords do not match</p>
               )}
               <Button
-                icon={saved ? <CheckCircle size={14} /> : <Save size={14} />}
-                variant={saved ? 'secondary' : 'primary'}
-                onClick={handleSave}
+                icon={pwSaved ? <CheckCircle size={14} /> : <Save size={14} />}
+                variant={pwSaved ? 'secondary' : 'primary'}
+                onClick={handlePasswordChange}
                 disabled={!password.current || !password.newPass || password.newPass !== password.confirm}
               >
-                {saved ? 'Password Updated!' : 'Update Password'}
+                {pwSaved ? 'Password Updated!' : 'Update Password'}
               </Button>
             </CardBody>
           </Card>

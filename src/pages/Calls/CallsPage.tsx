@@ -1,12 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../../components/Layout/Layout';
 import Table from '../../components/UI/Table';
-import { CallStatusBadge, Badge } from '../../components/UI/Badge';
+import { CallStatusBadge } from '../../components/UI/Badge';
 import SearchInput from '../../components/UI/SearchInput';
 import Avatar from '../../components/UI/Avatar';
-import { mockCallLogs } from '../../data/mock';
-import { mockProviders, mockCustomers } from '../../data/mock';
-import type { CallLog } from '../../types';
+import { listCalls, type CallLog } from '../../services/api';
 import { Phone, Video, PhoneCall, PhoneMissed, PhoneOff } from 'lucide-react';
 
 const fmtDate = (d: string) => new Date(d).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -19,15 +17,22 @@ const fmtDuration = (secs: number) => {
 
 export default function CallsPage() {
   const [search, setSearch] = useState('');
+  const [calls, setCalls] = useState<CallLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const allUsers = [
-    ...mockProviders.map((p) => ({ id: p.id, name: p.fullName, phone: p.phoneNumber, type: 'provider' as const })),
-    ...mockCustomers.map((c) => ({ id: c.id, name: c.fullName, phone: c.phoneNumber, type: 'customer' as const })),
-  ];
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      const res = await listCalls({ limit: 100, page: 0 });
+      setCalls(res.calls || []);
+      setLoading(false);
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, []);
 
-  const getUserPhone = (userId: string) => allUsers.find((u) => u.id === userId)?.phone ?? '—';
-
-  const filtered = mockCallLogs.filter((c) => {
+  const filtered = calls.filter((c) => {
     const q = search.toLowerCase();
     return !q || c.initiatorName.toLowerCase().includes(q) || c.recipientName.toLowerCase().includes(q);
   });
@@ -47,8 +52,8 @@ export default function CallsPage() {
           <Avatar name={c.initiatorName} size="sm" />
           <div>
             <p className="text-sm font-medium text-gray-800">{c.initiatorName}</p>
-            <a href={`tel:${getUserPhone(c.initiator)}`} className="text-xs font-mono text-gray-500 hover:text-[#165B43]">
-              {getUserPhone(c.initiator)}
+            <a href={`tel:${c.initiatorPhone}`} className="text-xs font-mono text-gray-500 hover:text-[#165B43]">
+              {c.initiatorPhone || '—'}
             </a>
           </div>
         </div>
@@ -62,7 +67,7 @@ export default function CallsPage() {
           <div>
             <p className="text-sm font-medium text-gray-800">{c.recipientName}</p>
             <a href={`tel:${c.recipientPhone}`} className="text-xs font-mono text-gray-500 hover:text-[#165B43]">
-              {c.recipientPhone}
+              {c.recipientPhone || '—'}
             </a>
           </div>
         </div>
@@ -116,10 +121,10 @@ export default function CallsPage() {
       {/* Stats Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
         {[
-          { label: 'Total Calls', value: mockCallLogs.length, color: '#165B43' },
-          { label: 'Answered', value: mockCallLogs.filter(c => c.status === 'ended').length, color: '#10b981' },
-          { label: 'Missed', value: mockCallLogs.filter(c => c.status === 'missed').length, color: '#f59e0b' },
-          { label: 'Rejected', value: mockCallLogs.filter(c => c.status === 'rejected').length, color: '#ef4444' },
+          { label: 'Total Calls', value: calls.length, color: '#165B43' },
+          { label: 'Answered', value: calls.filter(c => c.status === 'ended').length, color: '#10b981' },
+          { label: 'Missed', value: calls.filter(c => c.status === 'missed').length, color: '#f59e0b' },
+          { label: 'Rejected', value: calls.filter(c => c.status === 'rejected').length, color: '#ef4444' },
         ].map((stat) => (
           <div key={stat.label} className="bg-white rounded-xl border border-gray-200 p-4">
             <p className="text-2xl font-bold" style={{ color: stat.color }}>{stat.value}</p>
@@ -128,7 +133,11 @@ export default function CallsPage() {
         ))}
       </div>
 
-      <Table columns={columns} data={filtered} rowKey={(c) => c.id} emptyText="No call logs found" />
+      {loading ? (
+        <div className="flex items-center justify-center py-20 text-gray-400">Loading call logs...</div>
+      ) : (
+        <Table columns={columns} data={filtered} rowKey={(c) => c._id} emptyText="No call logs found" />
+      )}
     </Layout>
   );
 }

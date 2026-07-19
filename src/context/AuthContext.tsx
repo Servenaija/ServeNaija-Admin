@@ -1,36 +1,56 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import { loginAdmin, getMe, setToken, clearToken, getToken } from '../services/api';
+import type { AdminUser } from '../services/api';
 
 interface AuthContextValue {
   isAuthenticated: boolean;
-  login: (email: string, password: string) => boolean;
+  admin: AdminUser | null;
+  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const ADMIN_CREDENTIALS = { email: 'admin@servenaija.ng', password: 'admin123' };
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    () => sessionStorage.getItem('sn_admin_auth') === 'true'
-  );
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!getToken());
+  const [admin, setAdmin] = useState<AdminUser | null>(null);
 
-  const login = (email: string, password: string) => {
-    if (email === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password) {
-      setIsAuthenticated(true);
-      sessionStorage.setItem('sn_admin_auth', 'true');
-      return true;
+  // On mount, if there's already a token, fetch the admin profile
+  useEffect(() => {
+    if (getToken() && !admin) {
+      getMe()
+        .then(({ admin: a }) => {
+          setAdmin(a);
+          setIsAuthenticated(true);
+        })
+        .catch(() => {
+          clearToken();
+          setIsAuthenticated(false);
+        });
     }
-    return false;
+  }, []);
+
+  const login = async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await loginAdmin(email, password);
+      setToken(res.tokens.access.token);
+      setAdmin(res.admin);
+      setIsAuthenticated(true);
+      return { ok: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Login failed.';
+      return { ok: false, error: message };
+    }
   };
 
   const logout = () => {
+    clearToken();
+    setAdmin(null);
     setIsAuthenticated(false);
-    sessionStorage.removeItem('sn_admin_auth');
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, admin, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
 import { KYCStatusBadge } from '../../components/UI/Badge';
@@ -6,53 +6,68 @@ import Button from '../../components/UI/Button';
 import SearchInput from '../../components/UI/SearchInput';
 import Avatar from '../../components/UI/Avatar';
 import Modal from '../../components/UI/Modal';
-import { useApp } from '../../context/AppContext';
-import type { KYCRecord, KYCStatus } from '../../types';
+import { listKYC, approveKYC, rejectKYC } from '../../services/api';
+import type { KYCStatus } from '../../types';
 import { CheckCircle, XCircle, ExternalLink, ShieldCheck, Clock, Eye } from 'lucide-react';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 
 const STATUS_FILTERS: KYCStatus[] = ['submitted', 'pending', 'approved', 'rejected', 'not_started'];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function KYCPage() {
-  const { kycRecords, setKycRecords } = useApp();
+  const [kycRecords, setKycRecords] = useState<Row[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<KYCStatus | 'all'>('all');
-  const [viewRecord, setViewRecord] = useState<KYCRecord | null>(null);
+  const [viewRecord, setViewRecord] = useState<Row | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const filtered = kycRecords.filter((r) => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || r.userName.toLowerCase().includes(q) || r.documentType?.includes(q);
-    const matchStatus = statusFilter === 'all' || r.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
-  const handleApprove = (id: string) => {
-    setKycRecords((prev) =>
-      prev.map((r) =>
-        r.id === id ? { ...r, status: 'approved', reviewedAt: new Date().toISOString(), reviewedBy: 'admin', rejectionReason: null } : r
-      )
-    );
-    setViewRecord(null);
+  const loadRecords = () => {
+    setLoading(true);
+    listKYC({ search: search || undefined, status: statusFilter !== 'all' ? statusFilter : undefined, limit: 100, page: 0 })
+      .then((res) => { setKycRecords(res.records as Row[]); setTotal(res.total); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   };
 
-  const handleReject = (id: string) => {
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(loadRecords, 300);
+  }, [search, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered = kycRecords;
+
+  const handleApprove = async (id: string) => {
+    setActionLoading(true);
+    try {
+      await approveKYC(id);
+      setKycRecords((prev: Row[]) => prev.map((r) => r._id === id || r.id === id ? { ...r, status: 'approved', reviewedAt: new Date().toISOString() } : r));
+      setViewRecord(null);
+    } catch { /* ignore */ } finally { setActionLoading(false); }
+  };
+
+  const handleReject = async (id: string) => {
     if (!rejectReason.trim()) return;
-    setKycRecords((prev) =>
-      prev.map((r) =>
-        r.id === id ? { ...r, status: 'rejected', reviewedAt: new Date().toISOString(), reviewedBy: 'admin', rejectionReason: rejectReason.trim() } : r
-      )
-    );
-    setViewRecord(null);
-    setRejectReason('');
-    setShowRejectInput(false);
+    setActionLoading(true);
+    try {
+      await rejectKYC(id, rejectReason.trim());
+      setKycRecords((prev: Row[]) => prev.map((r) => r._id === id || r.id === id ? { ...r, status: 'rejected', reviewedAt: new Date().toISOString(), rejectionReason: rejectReason.trim() } : r));
+      setViewRecord(null);
+      setRejectReason('');
+      setShowRejectInput(false);
+    } catch { /* ignore */ } finally { setActionLoading(false); }
   };
 
-  const pendingCount = kycRecords.filter(r => r.status === 'pending' || r.status === 'submitted').length;
-  const approvedCount = kycRecords.filter(r => r.status === 'approved').length;
-  const rejectedCount = kycRecords.filter(r => r.status === 'rejected').length;
+  const pendingCount = kycRecords.filter((r: Row) => r.status === 'pending' || r.status === 'submitted').length;
+  const approvedCount = kycRecords.filter((r: Row) => r.status === 'approved').length;
+  const rejectedCount = kycRecords.filter((r: Row) => r.status === 'rejected').length;
 
   return (
     <Layout title="KYC Verification">
@@ -83,7 +98,7 @@ export default function KYCPage() {
             onClick={() => setStatusFilter('all')}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${statusFilter === 'all' ? 'bg-[#165B43] text-white border-[#165B43]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
           >
-            All <span className="ml-1 opacity-60">{kycRecords.length}</span>
+            All <span className="ml-1 opacity-60">{total}</span>
           </button>
           {STATUS_FILTERS.map((s) => (
             <button key={s} onClick={() => setStatusFilter(s)}
@@ -98,7 +113,7 @@ export default function KYCPage() {
       {/* KYC Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((rec) => (
-          <Card key={rec.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setViewRecord(rec); setShowRejectInput(false); setRejectReason(''); }}>
+          <Card key={rec._id || rec.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setViewRecord(rec); setShowRejectInput(false); setRejectReason(''); }}>
             <CardBody>
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
@@ -148,7 +163,7 @@ export default function KYCPage() {
               {(rec.status === 'pending' || rec.status === 'submitted') && (
                 <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleApprove(rec.id); }}
+                    onClick={(e) => { e.stopPropagation(); handleApprove(rec._id || rec.id); }}
                     className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-green-50 text-green-600 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors"
                   >
                     <CheckCircle size={12} />Approve
@@ -234,7 +249,7 @@ export default function KYCPage() {
                   </div>
                 )}
                 <div className="flex gap-3">
-                  <Button variant="primary" icon={<CheckCircle size={14} />} onClick={() => handleApprove(viewRecord.id)}>
+                  <Button variant="primary" icon={<CheckCircle size={14} />} onClick={() => handleApprove(viewRecord._id || viewRecord.id)} disabled={actionLoading}>
                     Approve KYC
                   </Button>
                   {!showRejectInput ? (
@@ -242,7 +257,7 @@ export default function KYCPage() {
                       Reject KYC
                     </Button>
                   ) : (
-                    <Button variant="danger" icon={<XCircle size={14} />} onClick={() => handleReject(viewRecord.id)} disabled={!rejectReason.trim()}>
+                    <Button variant="danger" icon={<XCircle size={14} />} onClick={() => handleReject(viewRecord._id || viewRecord.id)} disabled={!rejectReason.trim() || actionLoading}>
                       Confirm Reject
                     </Button>
                   )}

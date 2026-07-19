@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../../components/Layout/Layout';
 import Table from '../../components/UI/Table';
 import { Badge } from '../../components/UI/Badge';
 import SearchInput from '../../components/UI/SearchInput';
-import { mockTransactions } from '../../data/mock';
-import type { Transaction } from '../../types';
+import { listTransactions } from '../../services/api';
 import { CreditCard, TrendingUp, TrendingDown, DollarSign, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -16,63 +15,75 @@ const txnColor = (type: string) => {
 
 const txnSign = (type: string) => ['credit', 'escrow_release', 'refund'].includes(type) ? '+' : '-';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function TransactionsPage() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [transactions, setTransactions] = useState<Row[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const types = ['all', 'credit', 'debit', 'escrow_hold', 'escrow_release', 'refund', 'withdrawal'];
 
-  const filtered = mockTransactions.filter((t) => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || t.ownerName.toLowerCase().includes(q) || t.description.toLowerCase().includes(q) || t.reference.toLowerCase().includes(q);
-    const matchType = typeFilter === 'all' || t.type === typeFilter;
-    return matchSearch && matchType;
-  });
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setLoading(true);
+      listTransactions({ search: search || undefined, type: typeFilter !== 'all' ? typeFilter : undefined, limit: 100, page: 0 })
+        .then((res) => { setTransactions(res.transactions as Row[]); setTotal(res.total); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, 300);
+  }, [search, typeFilter]);
 
-  const totalVolume = mockTransactions.reduce((sum, t) => sum + t.amount, 0);
-  const credits = mockTransactions.filter(t => t.type === 'credit' || t.type === 'escrow_release');
-  const debits = mockTransactions.filter(t => t.type === 'debit' || t.type === 'withdrawal' || t.type === 'escrow_hold');
+  const filtered = transactions;
+  const credits = filtered.filter((t: Row) => t.type === 'credit' || t.type === 'escrow_release');
+  const debits = filtered.filter((t: Row) => t.type === 'debit' || t.type === 'withdrawal' || t.type === 'escrow_hold');
+  const totalVolume = filtered.reduce((sum: number, t: Row) => sum + (t.amount || 0), 0);
 
   const columns = [
     {
       key: 'ref', header: 'Reference',
-      render: (t: Transaction) => <span className="text-xs font-mono text-gray-600">{t.reference}</span>,
+      render: (t: Row) => <span className="text-xs font-mono text-gray-600">{t.reference}</span>,
     },
     {
       key: 'owner', header: 'User',
-      render: (t: Transaction) => (
+      render: (t: Row) => (
         <div>
-          <p className="text-sm font-medium text-gray-800">{t.ownerName}</p>
-          <Badge variant={t.ownerType === 'provider' ? 'info' : 'gold'} className="text-[9px]">{t.ownerType}</Badge>
+          <p className="text-sm font-medium text-gray-800">{t.ownerName || t.owner}</p>
+          <Badge variant={(t.ownerType || '') === 'provider' ? 'info' : 'gold'} className="text-[9px]">{t.ownerType || 'user'}</Badge>
         </div>
       ),
     },
     {
       key: 'type', header: 'Type',
-      render: (t: Transaction) => (
+      render: (t: Row) => (
         <div className="flex items-center gap-1.5">
           {['credit', 'escrow_release', 'refund'].includes(t.type)
             ? <ArrowDownLeft size={12} className="text-green-500" />
             : <ArrowUpRight size={12} className="text-red-500" />}
-          <span className="text-sm capitalize">{t.type.replace(/_/g, ' ')}</span>
+          <span className="text-sm capitalize">{(t.type || '').replace(/_/g, ' ')}</span>
         </div>
       ),
     },
     {
       key: 'amount', header: 'Amount',
-      render: (t: Transaction) => (
+      render: (t: Row) => (
         <span className={`text-sm font-semibold ${txnColor(t.type)}`}>
-          {txnSign(t.type)}₦{t.amount.toLocaleString()}
+          {txnSign(t.type)}₦{(t.amount || 0).toLocaleString()}
         </span>
       ),
     },
     {
       key: 'description', header: 'Description',
-      render: (t: Transaction) => <span className="text-xs text-gray-600">{t.description}</span>,
+      render: (t: Row) => <span className="text-xs text-gray-600">{t.description}</span>,
     },
     {
       key: 'status', header: 'Status',
-      render: (t: Transaction) => (
+      render: (t: Row) => (
         <Badge variant={t.status === 'success' ? 'success' : t.status === 'failed' ? 'danger' : 'warning'}>
           {t.status}
         </Badge>
@@ -80,7 +91,7 @@ export default function TransactionsPage() {
     },
     {
       key: 'date', header: 'Date',
-      render: (t: Transaction) => <span className="text-xs text-gray-500">{fmtDate(t.createdAt)}</span>,
+      render: (t: Row) => <span className="text-xs text-gray-500">{fmtDate(t.createdAt)}</span>,
     },
   ];
 
@@ -91,7 +102,7 @@ export default function TransactionsPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-[#165B43]/10"><CreditCard size={18} className="text-[#165B43]" /></div>
           <div>
-            <p className="text-xl font-bold text-gray-800">{mockTransactions.length}</p>
+            <p className="text-xl font-bold text-gray-800">{loading ? '...' : total}</p>
             <p className="text-xs text-gray-500">Total Transactions</p>
           </div>
         </div>
@@ -131,7 +142,7 @@ export default function TransactionsPage() {
         <SearchInput value={search} onChange={setSearch} placeholder="Search transactions..." className="w-64" />
       </div>
 
-      <Table columns={columns} data={filtered} rowKey={(t) => t.id} emptyText="No transactions found" />
+      <Table columns={columns} data={filtered} rowKey={(t) => t._id || t.id} emptyText={loading ? 'Loading transactions...' : 'No transactions found'} />
     </Layout>
   );
 }

@@ -1,78 +1,66 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
 import { Badge } from '../../components/UI/Badge';
 import Button from '../../components/UI/Button';
 import Modal from '../../components/UI/Modal';
 import SearchInput from '../../components/UI/SearchInput';
-import { useApp } from '../../context/AppContext';
-import type { NotificationType, UserType } from '../../types';
-import { Bell, Send, CheckCheck, Trash2, Users, UserCheck } from 'lucide-react';
+import { listNotifications, broadcastNotification } from '../../services/api';
+import type { NotificationType } from '../../types';
+import { Bell, Send, Users, UserCheck, CheckCheck } from 'lucide-react';
 
 const fmtDate = (d: string) => new Date(d).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-const typeVariant: Record<NotificationType, 'info' | 'success' | 'warning' | 'gold' | 'danger' | 'default'> = {
+const typeVariant: Record<string, 'info' | 'success' | 'warning' | 'gold' | 'danger' | 'default'> = {
   booking: 'info', payment: 'success', kyc: 'warning',
   chat: 'gold', call: 'info', system: 'default', promotion: 'gold',
 };
 
 const emptyBroadcast = { title: '', body: '', type: 'system' as NotificationType, target: 'all' as 'all' | 'providers' | 'customers' };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function NotificationsPage() {
-  const { notifications, setNotifications, providers, customers } = useApp();
+  const [notifications, setNotifications] = useState<Row[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<NotificationType | 'all'>('all');
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [broadcast, setBroadcast] = useState(emptyBroadcast);
+  const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const filtered = notifications.filter((n) => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || n.recipientName.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q);
-    const matchType = typeFilter === 'all' || n.type === typeFilter;
-    return matchSearch && matchType;
-  });
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setLoading(true);
+      listNotifications({ search: search || undefined, type: typeFilter !== 'all' ? typeFilter : undefined, limit: 100, page: 0 })
+        .then((res) => { setNotifications(res.notifications as Row[]); setTotal(res.total); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, 300);
+  }, [search, typeFilter]);
 
-  const markAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true, readAt: n.readAt ?? new Date().toISOString() })));
-  };
+  const filtered = notifications;
 
-  const handleSendBroadcast = () => {
+  const handleSendBroadcast = async () => {
     if (!broadcast.title.trim() || !broadcast.body.trim()) return;
-
-    const recipients = broadcast.target === 'all'
-      ? [...providers.map(p => ({ id: p.id, name: p.fullName, type: 'provider' as UserType })),
-         ...customers.map(c => ({ id: c.id, name: c.fullName, type: 'customer' as UserType }))]
-      : broadcast.target === 'providers'
-        ? providers.map(p => ({ id: p.id, name: p.fullName, type: 'provider' as UserType }))
-        : customers.map(c => ({ id: c.id, name: c.fullName, type: 'customer' as UserType }));
-
-    const newNotifs = recipients.map((r) => ({
-      id: `notif-${Date.now()}-${r.id}`,
-      recipient: r.id,
-      recipientName: r.name,
-      recipientType: r.type,
-      title: broadcast.title,
-      body: broadcast.body,
-      type: broadcast.type,
-      data: {},
-      isRead: false,
-      readAt: null,
-      pushStatus: 'sent' as const,
-      pushError: null,
-      createdAt: new Date().toISOString(),
-    }));
-
-    setNotifications((prev) => [...newNotifs, ...prev]);
-    setSent(true);
-    setTimeout(() => {
-      setSent(false);
-      setShowBroadcast(false);
-      setBroadcast(emptyBroadcast);
-    }, 1500);
+    setSending(true);
+    try {
+      await broadcastNotification({ title: broadcast.title, body: broadcast.body, type: broadcast.type, target: broadcast.target });
+      setSent(true);
+      setTimeout(() => {
+        setSent(false);
+        setShowBroadcast(false);
+        setBroadcast(emptyBroadcast);
+      }, 1500);
+    } catch { /* ignore */ } finally { setSending(false); }
   };
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadCount = notifications.filter((n: Row) => !n.isRead).length;
   const types: (NotificationType | 'all')[] = ['all', 'booking', 'payment', 'kyc', 'chat', 'call', 'system', 'promotion'];
 
   return (
@@ -82,11 +70,6 @@ export default function NotificationsPage() {
           <h2 className="text-sm text-gray-600">
             {unreadCount > 0 && <span className="font-semibold text-[#165B43]">{unreadCount} unread</span>}
           </h2>
-          {unreadCount > 0 && (
-            <Button variant="secondary" size="sm" icon={<CheckCheck size={14} />} onClick={markAllRead}>
-              Mark all read
-            </Button>
-          )}
         </div>
         <div className="flex gap-2">
           <SearchInput value={search} onChange={setSearch} placeholder="Search notifications..." className="w-56" />
@@ -112,13 +95,13 @@ export default function NotificationsPage() {
           {filtered.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <Bell size={40} className="mx-auto mb-3 opacity-20" />
-              <p>No notifications found</p>
+              <p>{loading ? 'Loading notifications...' : 'No notifications found'}</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
               {filtered.map((notif) => (
                 <div
-                  key={notif.id}
+                  key={notif._id || notif.id}
                   className={`flex items-start gap-4 px-5 py-4 hover:bg-gray-50 transition-colors ${!notif.isRead ? 'bg-blue-50/30' : ''}`}
                 >
                   <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${notif.isRead ? 'bg-gray-300' : 'bg-[#165B43] animate-pulse-ring'}`} />
@@ -229,9 +212,9 @@ export default function NotificationsPage() {
                 className="flex-1"
                 icon={<Send size={14} />}
                 onClick={handleSendBroadcast}
-                disabled={!broadcast.title.trim() || !broadcast.body.trim()}
+                disabled={!broadcast.title.trim() || !broadcast.body.trim() || sending}
               >
-                Send Broadcast
+                {sending ? 'Sending...' : 'Send Broadcast'}
               </Button>
             </div>
           </div>

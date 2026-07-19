@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
@@ -6,20 +6,69 @@ import { Badge, BookingStatusBadge } from '../../components/UI/Badge';
 import Button from '../../components/UI/Button';
 import Avatar from '../../components/UI/Avatar';
 import ConfirmDialog from '../../components/UI/ConfirmDialog';
-import { useApp } from '../../context/AppContext';
-import { mockBookings, mockTransactions, mockOrders } from '../../data/mock';
+import {
+  getCustomer, banCustomer, getCustomerBookings,
+  getCustomerOrders, getCustomerTransactions,
+} from '../../services/api';
 import { Phone, Mail, MapPin, Shield, Ban, CheckCircle, MessageSquare, ArrowLeft, UserCheck } from 'lucide-react';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
+
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { customers, setCustomers } = useApp();
 
-  const customer = customers.find((c) => c.id === id);
+  const [customer, setCustomer] = useState<Row | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [customerBookings, setCustomerBookings] = useState<Row[]>([]);
+  const [customerOrders, setCustomerOrders] = useState<Row[]>([]);
+  const [customerTxns, setCustomerTxns] = useState<Row[]>([]);
   const [tab, setTab] = useState<'overview' | 'bookings' | 'orders' | 'transactions'>('overview');
   const [showBanConfirm, setShowBanConfirm] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    getCustomer(id)
+      .then((res) => setCustomer(res.customer))
+      .catch(() => setCustomer(null))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    if (tab === 'bookings') {
+      getCustomerBookings(id, { limit: 50 }).then((r) => setCustomerBookings(r.bookings as Row[])).catch(() => {});
+    } else if (tab === 'orders') {
+      getCustomerOrders(id, { limit: 50 }).then((r) => setCustomerOrders(r.orders as Row[])).catch(() => {});
+    } else if (tab === 'transactions') {
+      getCustomerTransactions(id, { limit: 50 }).then((r) => setCustomerTxns(r.transactions as Row[])).catch(() => {});
+    }
+  }, [id, tab]);
+
+  const handleBanToggle = async () => {
+    if (!id) return;
+    try {
+      const res = await banCustomer(id);
+      setCustomer((prev: Row) => prev ? { ...prev, isBanned: res.isBanned } : prev);
+    } catch { /* ignore */ }
+    setShowBanConfirm(false);
+  };
+
+  const tabs = ['overview', 'bookings', 'orders', 'transactions'] as const;
+
+  if (loading) {
+    return (
+      <Layout title="Loading...">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#165B43] border-t-transparent" />
+        </div>
+      </Layout>
+    );
+  }
 
   if (!customer) {
     return (
@@ -29,17 +78,6 @@ export default function CustomerDetail() {
       </Layout>
     );
   }
-
-  const customerBookings = mockBookings.filter(b => b.customer.id === id);
-  const customerOrders = mockOrders.filter(o => o.buyer.id === id);
-  const customerTxns = mockTransactions.filter(t => t.owner === id);
-
-  const handleBanToggle = () => {
-    setCustomers(prev => prev.map(c => c.id === id ? { ...c, isBanned: !c.isBanned } : c));
-    setShowBanConfirm(false);
-  };
-
-  const tabs = ['overview', 'bookings', 'orders', 'transactions'] as const;
 
   return (
     <Layout title={customer.fullName}>
@@ -80,23 +118,23 @@ export default function CustomerDetail() {
                 <a href={`tel:${customer.phoneNumber}`} className="flex items-center gap-1 hover:text-[#165B43] font-mono">
                   <Phone size={14} />{customer.phoneNumber}
                 </a>
-                {customer.location.city && (
+                {customer.location?.city && (
                   <span className="flex items-center gap-1">
-                    <MapPin size={14} />{customer.location.city}, {customer.location.state}
+                    <MapPin size={14} />{customer.location.city}, {customer.location?.state}
                   </span>
                 )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <p className="text-lg font-bold text-gray-800">{customer.totalBookings}</p>
+                  <p className="text-lg font-bold text-gray-800">{customer.totalBookings ?? 0}</p>
                   <p className="text-xs text-gray-500">Bookings</p>
                 </div>
                 <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <p className="text-lg font-bold text-gray-800">{customer.totalOrders}</p>
+                  <p className="text-lg font-bold text-gray-800">{customer.totalOrders ?? 0}</p>
                   <p className="text-xs text-gray-500">Orders</p>
                 </div>
                 <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <p className="text-lg font-bold text-green-600">₦{customer.walletBalance.toLocaleString()}</p>
+                  <p className="text-lg font-bold text-green-600">₦{(customer.walletBalance ?? 0).toLocaleString()}</p>
                   <p className="text-xs text-gray-500">Wallet Balance</p>
                 </div>
                 <div className="text-center p-3 bg-gray-50 rounded-lg">
@@ -129,22 +167,22 @@ export default function CustomerDetail() {
           <Card>
             <CardHeader><p className="font-semibold text-sm flex items-center gap-2"><Shield size={15} />Account Info</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="Birthday" value={customer.birthday ? fmtDate(customer.birthday) : '—'} />
-              <Row label="Email Verified" value={customer.isEmailVerified ? '✓ Yes' : '✗ No'} />
-              <Row label="Phone Verified" value={customer.isPhoneVerified ? '✓ Yes' : '✗ No'} />
-              <Row label="Is Agent" value={customer.isAgent ? 'Yes' : 'No'} />
-              <Row label="Agent Code Used" value={customer.agentCode || '—'} />
-              <Row label="Own Referral Code" value={customer.referralCode || '—'} />
-              <Row label="Last Login" value={customer.lastLogin ? fmtDate(customer.lastLogin) : '—'} />
+              <InfoRow label="Birthday" value={customer.birthday ? fmtDate(customer.birthday) : '—'} />
+              <InfoRow label="Email Verified" value={customer.isEmailVerified ? '✓ Yes' : '✗ No'} />
+              <InfoRow label="Phone Verified" value={customer.isPhoneVerified ? '✓ Yes' : '✗ No'} />
+              <InfoRow label="Is Agent" value={customer.isAgent ? 'Yes' : 'No'} />
+              <InfoRow label="Agent Code Used" value={customer.agentCode || '—'} />
+              <InfoRow label="Own Referral Code" value={customer.referralCode || '—'} />
+              <InfoRow label="Last Login" value={customer.lastLogin ? fmtDate(customer.lastLogin) : '—'} />
             </CardBody>
           </Card>
           <Card>
             <CardHeader><p className="font-semibold text-sm flex items-center gap-2"><MapPin size={15} />Address</p></CardHeader>
             <CardBody className="space-y-3">
-              <Row label="State" value={customer.location.state || '—'} />
-              <Row label="City" value={customer.location.city || '—'} />
-              <Row label="Address" value={customer.location.address || '—'} />
-              <Row label="Landmark" value={customer.location.landmark || '—'} />
+              <InfoRow label="State" value={customer.location?.state || '—'} />
+              <InfoRow label="City" value={customer.location?.city || '—'} />
+              <InfoRow label="Address" value={customer.location?.address || '—'} />
+              <InfoRow label="Landmark" value={customer.location?.landmark || '—'} />
             </CardBody>
           </Card>
         </div>
@@ -158,16 +196,16 @@ export default function CustomerDetail() {
               <p className="text-center py-10 text-gray-400 text-sm">No bookings yet</p>
             ) : (
               <div className="divide-y divide-gray-100">
-                {customerBookings.map((bk) => (
-                  <div key={bk.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/bookings/${bk.id}`)}>
-                    <Avatar name={bk.provider.name} size="sm" />
+                {customerBookings.map((bk: Row) => (
+                  <div key={bk._id || bk.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/bookings/${bk._id || bk.id}`)}>
+                    <Avatar name={bk.provider?.fullName || bk.provider?.name || '?'} size="sm" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800">{bk.service.name}</p>
-                      <p className="text-xs text-gray-500">Provider: {bk.provider.name} · {fmtDate(bk.createdAt)}</p>
+                      <p className="text-sm font-medium text-gray-800">{bk.service?.name}</p>
+                      <p className="text-xs text-gray-500">Provider: {bk.provider?.fullName || bk.provider?.name} · {fmtDate(bk.createdAt)}</p>
                     </div>
                     <div className="text-right">
                       <BookingStatusBadge status={bk.status} />
-                      <p className="text-xs text-gray-500 mt-0.5">₦{bk.totalAmount.toLocaleString()}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">₦{(bk.totalAmount || 0).toLocaleString()}</p>
                     </div>
                   </div>
                 ))}
@@ -185,17 +223,17 @@ export default function CustomerDetail() {
               <p className="text-center py-10 text-gray-400 text-sm">No orders yet</p>
             ) : (
               <div className="divide-y divide-gray-100">
-                {customerOrders.map((ord) => (
-                  <div key={ord.id} className="flex items-center justify-between px-5 py-3">
+                {customerOrders.map((ord: Row) => (
+                  <div key={ord._id || ord.id} className="flex items-center justify-between px-5 py-3">
                     <div>
-                      <p className="text-sm font-medium text-gray-800">{ord.store.name}</p>
-                      <p className="text-xs text-gray-500">{ord.items.length} items · {fmtDate(ord.createdAt)}</p>
+                      <p className="text-sm font-medium text-gray-800">{ord.store?.name || '—'}</p>
+                      <p className="text-xs text-gray-500">{(ord.items || []).length} items · {fmtDate(ord.createdAt)}</p>
                     </div>
                     <div className="text-right">
                       <Badge variant={ord.status === 'delivered' ? 'success' : ord.status === 'cancelled' ? 'danger' : 'info'}>
                         {ord.status}
                       </Badge>
-                      <p className="text-xs text-gray-500 mt-0.5">₦{ord.total.toLocaleString()}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">₦{(ord.total || ord.totalAmount || 0).toLocaleString()}</p>
                     </div>
                   </div>
                 ))}
@@ -213,15 +251,15 @@ export default function CustomerDetail() {
               <p className="text-center py-10 text-gray-400 text-sm">No transactions yet</p>
             ) : (
               <div className="divide-y divide-gray-100">
-                {customerTxns.map((txn) => (
-                  <div key={txn.id} className="flex items-center justify-between px-5 py-3">
+                {customerTxns.map((txn: Row) => (
+                  <div key={txn._id || txn.id} className="flex items-center justify-between px-5 py-3">
                     <div>
-                      <p className="text-sm font-medium text-gray-800 capitalize">{txn.type.replace(/_/g, ' ')}</p>
+                      <p className="text-sm font-medium text-gray-800 capitalize">{(txn.type || '').replace(/_/g, ' ')}</p>
                       <p className="text-xs text-gray-500">{txn.description}</p>
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-semibold ${txn.type === 'escrow_hold' || txn.type === 'debit' ? 'text-red-500' : 'text-green-600'}`}>
-                        {txn.type === 'escrow_hold' || txn.type === 'debit' ? '-' : '+'}₦{txn.amount.toLocaleString()}
+                        {txn.type === 'escrow_hold' || txn.type === 'debit' ? '-' : '+'}₦{(txn.amount || 0).toLocaleString()}
                       </p>
                       <p className="text-xs text-gray-400">{fmtDate(txn.createdAt)}</p>
                     </div>
@@ -248,7 +286,7 @@ export default function CustomerDetail() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between items-start gap-3">
       <span className="text-xs text-gray-500 flex-shrink-0 w-32">{label}</span>

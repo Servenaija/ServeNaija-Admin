@@ -8,11 +8,12 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   variant?: 'danger' | 'primary';
+  loading?: boolean;   // ← add this
 }
 
 export default function ConfirmDialog({
   open, title, message, confirmLabel = 'Confirm',
-  onConfirm, onCancel, variant = 'danger',
+  onConfirm, onCancel, variant = 'danger', loading = false,
 }: ConfirmDialogProps) {
   if (!open) return null;
   return (
@@ -22,8 +23,8 @@ export default function ConfirmDialog({
         <h3 className="text-base font-semibold text-gray-800 mb-2">{title}</h3>
         <p className="text-sm text-gray-500 mb-5">{message}</p>
         <div className="flex gap-3 justify-end">
-          <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-          <Button variant={variant} onClick={onConfirm}>{confirmLabel}</Button>
+          <Button variant="secondary" onClick={onCancel} disabled={loading}>Cancel</Button>
+          <Button variant={variant} onClick={onConfirm} loading={loading}>{confirmLabel}</Button>
         </div>
       </div>
     </div>
