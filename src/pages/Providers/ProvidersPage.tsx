@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout/Layout';
 import Table from '../../components/UI/Table';
-import { Badge, KYCStatusBadge } from '../../components/UI/Badge';
+import { Badge, KYCStatusBadge, normalizeKycStatus } from '../../components/UI/Badge';
 import SearchInput from '../../components/UI/SearchInput';
 import Button from '../../components/UI/Button';
 import Avatar from '../../components/UI/Avatar';
+import Pagination from '../../components/UI/Pagination';
 import { listProviders } from '../../services/api';
 import { Filter, UserCheck, Ban, CheckCircle } from 'lucide-react';
 
@@ -14,25 +15,36 @@ const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-NG', { day: 'n
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any;
 
+const PAGE_SIZE = 25;
+
 export default function ProvidersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'banned' | 'kyc_pending' | 'provider' | 'business'>('all');
   const [providers, setProviders] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // reset to first page whenever a filter/search changes
+  useEffect(() => { setPage(0); }, [search, filter]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setLoading(true);
-      listProviders({ search: search || undefined, filter: filter !== 'all' ? filter : undefined, limit: 100, page: 0 })
-        .then((res) => { setProviders(res.providers as Row[]); setTotal(res.total); })
+      listProviders({ search: search || undefined, filter: filter !== 'all' ? filter : undefined, limit: PAGE_SIZE, page })
+        .then((res) => {
+          setProviders(res.providers as Row[]);
+          setTotal(res.total);
+          setTotalPages(res.totalPages ?? Math.ceil((res.total || 0) / PAGE_SIZE));
+        })
         .catch(() => {})
         .finally(() => setLoading(false));
     }, 300);
-  }, [search, filter]);
+  }, [search, filter, page]);
 
   const filtered = providers;
 
@@ -69,7 +81,7 @@ export default function ProvidersPage() {
     },
     {
       key: 'kyc', header: 'KYC',
-      render: (p: Row) => <KYCStatusBadge status={p.kyc?.status || 'not_started'} />,
+      render: (p: Row) => <KYCStatusBadge status={normalizeKycStatus(p)} />,
     },
     {
       key: 'rating', header: 'Rating',
@@ -130,6 +142,12 @@ export default function ProvidersPage() {
         onRowClick={(p) => navigate(`/providers/${p._id || p.id}`)}
         emptyText={loading ? 'Loading providers...' : 'No providers found'}
       />
+
+      {totalPages > 1 && (
+        <div className="mt-4">
+          <Pagination page={page} totalPages={totalPages} onChange={setPage} total={total} pageSize={PAGE_SIZE} />
+        </div>
+      )}
     </Layout>
   );
 }

@@ -3,11 +3,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { useOpsRealtime } from '../../hooks/useOpsRealtime';
 
 export default function Header({ title, onMenuToggle }: { title?: string; onMenuToggle?: () => void }) {
   const { adminName, adminEmail, notifications } = useApp();
   const { logout } = useAuth();
-  const unread = notifications.filter(n => !n.isRead).length;
+  const { unreadTotal } = useOpsRealtime();
+  const unread = Math.max(notifications.filter(n => !n.isRead).length, unreadTotal);
   const [showProfile, setShowProfile] = useState(false);
   const navigate = useNavigate();
 

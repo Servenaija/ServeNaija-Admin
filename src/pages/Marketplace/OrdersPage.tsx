@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout/Layout';
 import Table from '../../components/UI/Table';
 import { Badge } from '../../components/UI/Badge';
 import SearchInput from '../../components/UI/SearchInput';
 import Avatar from '../../components/UI/Avatar';
+import Pagination from '../../components/UI/Pagination';
+import AdminCancelButton from '../../components/UI/AdminCancelButton';
+import OrderDetailModal from '../../components/UI/OrderDetailModal';
 import { listOrders } from '../../services/api';
 import type { OrderStatus } from '../../types';
 
@@ -20,24 +22,35 @@ const STATUS_FILTERS: OrderStatus[] = ['pending', 'confirmed', 'processing', 'sh
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any;
 
+const PAGE_SIZE = 25;
+
 export default function OrdersPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
   const [orders, setOrders] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => { setPage(0); }, [search, statusFilter]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setLoading(true);
-      listOrders({ search: search || undefined, status: statusFilter !== 'all' ? statusFilter : undefined, limit: 100, page: 0 })
-        .then((res) => { setOrders(res.orders as Row[]); setTotal(res.total); })
+      listOrders({ search: search || undefined, status: statusFilter !== 'all' ? statusFilter : undefined, limit: PAGE_SIZE, page })
+        .then((res) => {
+          setOrders(res.orders as Row[]);
+          setTotal(res.total);
+          setTotalPages(Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE)));
+        })
         .catch(() => {})
         .finally(() => setLoading(false));
     }, 300);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, page]);
 
   const filtered = orders;
 
@@ -85,6 +98,19 @@ export default function OrdersPage() {
       key: 'date', header: 'Date',
       render: (o: Row) => <span className="text-xs text-gray-500">{fmtDate(o.createdAt)}</span>,
     },
+    {
+      key: 'adminAction', header: 'Admin',
+      render: (o: Row) => (
+        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <AdminCancelButton
+            kind="order"
+            id={String(o._id || o.id)}
+            status={o.status}
+            onDone={() => window.location.reload()}
+          />
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -107,7 +133,21 @@ export default function OrdersPage() {
         <SearchInput value={search} onChange={setSearch} placeholder="Search orders..." className="w-56" />
       </div>
 
-      <Table columns={columns} data={filtered} rowKey={(o) => o._id || o.id} emptyText={loading ? 'Loading orders...' : 'No orders found'} />
+      <Table
+        columns={columns}
+        data={filtered}
+        rowKey={(o) => o._id || o.id}
+        onRowClick={(o) => setDetailId(String(o._id || o.id))}
+        emptyText={loading ? 'Loading orders...' : 'No orders found'}
+      />
+
+      {totalPages > 1 && (
+        <div className="mt-4">
+          <Pagination page={page} totalPages={totalPages} onChange={setPage} total={total} pageSize={PAGE_SIZE} />
+        </div>
+      )}
+
+      <OrderDetailModal orderId={detailId} onClose={() => setDetailId(null)} />
     </Layout>
   );
 }

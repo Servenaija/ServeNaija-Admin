@@ -13,6 +13,7 @@ import {
   AlertTriangle, TrendingUp, Clock, CheckCircle2,
 } from 'lucide-react';
 import { getDashboard, listBookings, listProviders } from '../services/api';
+import { getDashboardV2, getFinanceOverview } from '../services/adminOps';
 import type { DashboardData } from '../services/api';
 
 const COLORS = ['#165B43', '#D6A643', '#ef4444', '#f97316'];
@@ -25,6 +26,8 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardData | null>(null);
   const [recentBookings, setRecentBookings] = useState<Row[]>([]);
   const [topProviders, setTopProviders] = useState<Row[]>([]);
+  const [kycV2, setKycV2] = useState<{ pending: number; approved: number; noKyc: number } | null>(null);
+  const [paystack, setPaystack] = useState<{ available: number; unavailable?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,11 +35,24 @@ export default function DashboardPage() {
       getDashboard(),
       listBookings({ limit: 4, page: 0 }),
       listProviders({ limit: 5, page: 0 }),
+      getDashboardV2().catch(() => null),
+      getFinanceOverview().catch(() => null),
     ])
-      .then(([dashData, bookingsRes, providersRes]) => {
+      .then(([dashData, bookingsRes, providersRes, v2, fin]) => {
         setStats(dashData);
         setRecentBookings((bookingsRes.bookings as Row[]).slice(0, 4));
-        setTopProviders((providersRes.providers as Row[]).slice(0, 5));
+        // prefer finance top-provider when available
+        if (fin?.topProviders?.length) {
+          setTopProviders(fin.topProviders.map((t: Row) => ({
+            _id: t.provider?._id, fullName: t.provider?.fullName,
+            rating: '—', totalJobs: (t.orders || 0) + (t.jobs || 0),
+          })));
+        } else {
+          setTopProviders((providersRes.providers as Row[]).slice(0, 5));
+        }
+        if (v2?.kyc) setKycV2(v2.kyc);
+        if (fin?.paystack) setPaystack(fin.paystack);
+        else if (fin?.totals) setPaystack({ available: 0, unavailable: true });
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -61,12 +77,23 @@ export default function DashboardPage() {
   }
 
   const s = stats;
+  const pendingKyc = kycV2?.pending ?? s.pendingKYC;
+  const noKyc = kycV2?.noKyc;
+  const approvedKyc = kycV2?.approved;
 
   return (
     <Layout title="Dashboard">
+      {paystack && (
+        <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
+          <p className="text-sm text-gray-600">Paystack available balance: <b className="text-gray-800">₦{(paystack.available || 0).toLocaleString()}</b></p>
+          {paystack.unavailable
+            ? <span className="text-[11px] text-amber-600">live unavailable</span>
+            : <a href="/finance" className="text-xs text-[#165B43] font-semibold hover:underline">View finance →</a>}
+        </div>
+      )}
       {/* KPI Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard title="Total Providers" value={s.totalProviders} icon={UserCheck} color="#165B43" trend={12} sub={`${s.activeProviders} active · ${s.pendingKYC} KYC pending`} />
+        <StatCard title="Total Providers" value={s.totalProviders} icon={UserCheck} color="#165B43" trend={12} sub={`${s.activeProviders} active · ${pendingKyc} KYC pending${noKyc !== undefined ? ` · ${noKyc} no KYC` : ''}`} />
         <StatCard title="Total Customers" value={s.totalCustomers} icon={Users} color="#D6A643" trend={18} sub={`${s.activeCustomers} active`} />
         <StatCard title="Total Bookings" value={s.totalBookings} icon={CalendarCheck} color="#3b82f6" trend={8} sub={`${s.pendingBookings} pending · ${s.disputedBookings} disputed`} />
         <StatCard title="Platform Revenue" value={fmt(s.totalRevenue)} icon={DollarSign} color="#10b981" trend={15} sub={`Today: ${fmt(s.todayRevenue)}`} />
@@ -226,7 +253,7 @@ export default function DashboardPage() {
             <p className="text-xs font-semibold text-gray-600">KYC Approved</p>
           </div>
           <p className="text-xl font-bold text-gray-800">
-            {Math.max(0, s.totalProviders - s.pendingKYC)}
+            {approvedKyc ?? Math.max(0, s.totalProviders - s.pendingKYC)}
           </p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -234,7 +261,8 @@ export default function DashboardPage() {
             <Clock size={16} className="text-yellow-500" />
             <p className="text-xs font-semibold text-gray-600">KYC Pending</p>
           </div>
-          <p className="text-xl font-bold text-gray-800">{s.pendingKYC}</p>
+          <p className="text-xl font-bold text-gray-800">{pendingKyc}</p>
+          {noKyc !== undefined && <p className="text-[11px] text-gray-500">{noKyc} with no KYC</p>}
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-2">

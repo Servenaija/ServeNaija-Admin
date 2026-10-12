@@ -4,6 +4,7 @@ import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
 import { BookingStatusBadge, PaymentStatusBadge } from '../../components/UI/Badge';
 import Button from '../../components/UI/Button';
+import AdminCancelButton from '../../components/UI/AdminCancelButton';
 import Avatar from '../../components/UI/Avatar';
 import { getBooking } from '../../services/api';
 import { ArrowLeft, Phone, MapPin, MessageSquare, Clock, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
@@ -62,6 +63,7 @@ export default function BookingDetail() {
         <div className="flex gap-2">
           <BookingStatusBadge status={booking.status} />
           <PaymentStatusBadge status={booking.paymentStatus} />
+          <AdminCancelButton kind="booking" id={String(bookingId)} status={booking.status} onDone={() => window.location.reload()} />
         </div>
       </div>
 

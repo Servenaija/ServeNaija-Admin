@@ -1,224 +1,306 @@
+// src/pages/Chat/ChatPage.tsx
+// Support-ticket-only page. Direct 1:1 chat removed from admin console.
+// Admin sees and resolves support tickets with real-time updates and sound.
+
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout/Layout';
-import Avatar from '../../components/UI/Avatar';
 import Button from '../../components/UI/Button';
-import { useApp } from '../../context/AppContext';
-import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 import {
-  listConversations, createOrGetConversation,
-  listMessages, sendChatMessage,
-} from '../../services/api';
-import {
-  Send, Phone, Plus, Search, MessageSquare, Image, CheckCheck, Check,
-} from 'lucide-react';
+  getAdminTickets,
+  getAdminTicket,
+  sendAdminMessage,
+  resolveTicket,
+  adminCloseTicket,
+  assignTicket,
+} from '../../services/support';
+import { Send, CheckCheck, Check, LifeBuoy } from 'lucide-react';
+import toast from 'react-hot-toast';
 
-const fmtTime = (d: string) => new Date(d).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
+/* ---------- helpers ---------- */
+const fmtTime = (d: string) =>
+  new Date(d).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
+
 const fmtConvDate = (d: string) => {
-  const now = new Date();
   const date = new Date(d);
-  const diff = now.getTime() - date.getTime();
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return date.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString('en-NG', { day: '2-digit', month: 'short' });
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Conv = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Msg = any;
+/* ---------- types (match backend) ---------- */
+type TicketStatus = 'open' | 'in-progress' | 'resolved' | 'closed';
+
+type TicketMessage = {
+  _id?: string;
+  senderId: string;
+  senderType: 'user' | 'admin';
+  senderName: string;
+  text: string;
+  imageUrl?: string;
+  createdAt: string;
+  readBy: string[];
+};
+
+type Ticket = {
+  _id: string;
+  user: { userId: string; userType: 'customer' | 'provider'; name: string; email: string };
+  subject: string;
+  status: TicketStatus;
+  messages: TicketMessage[];
+  assignedTo: string | null;
+  lastMessageAt: string;
+  unreadCount: number;
+  createdAt: string;
+  report?: { reportedUserId?: string | null; reason?: string; description?: string };
+};
+
+const getStatusBadge = (status: TicketStatus): string => {
+  switch (status) {
+    case 'open': return 'bg-blue-100 text-blue-700';
+    case 'in-progress': return 'bg-amber-100 text-amber-700';
+    case 'resolved': return 'bg-green-100 text-green-700';
+    case 'closed': return 'bg-gray-100 text-gray-600';
+    default: return 'bg-gray-100 text-gray-600';
+  }
+};
 
 export default function ChatPage() {
-  const { providers, customers } = useApp();
-  const { admin } = useAuth();
-  const adminId = (admin as any)?._id || (admin as any)?.id || '';
+  const { socket } = useSocket();
 
-  const [conversations, setConversations] = useState<Conv[]>([]);
-  const [messages, setMessages] = useState<Record<string, Msg[]>>({});
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
-  const [input, setInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [showNewChat, setShowNewChat] = useState(false);
-  const [loadingMsgs, setLoadingMsgs] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const [ticketInput, setTicketInput] = useState('');
+  const [loadingTickets, setLoadingTickets] = useState(false);
+  const [ticketNotifications, setTicketNotifications] = useState<Record<string, number>>({});
+  const [unreadTicketCount, setUnreadTicketCount] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const activeConv = conversations.find((c) => (c._id || c.id) === activeConvId);
-  const activeMessages = activeConvId ? (messages[activeConvId] ?? []) : [];
-
-  const filteredConvs = conversations.filter((c) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return c.participants.some((p: Conv) => p.name.toLowerCase().includes(q));
-  });
-
-  // Fetch conversations on mount
-  useEffect(() => {
-    listConversations()
-      .then((res) => {
-        const convs = (res.conversations || []) as Conv[];
-        setConversations(convs);
-        if (convs.length > 0) setActiveConvId(convs[0]._id || convs[0].id);
-      })
-      .catch(() => {});
+  const playNotificationSound = useCallback(() => {
+    try {
+      if (!audioRef.current) audioRef.current = new Audio('/notification.mp3');
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(() => {});
+    } catch { /* ignore */ }
   }, []);
 
-  // Fetch messages when active conversation changes
-  const loadMessages = useCallback(async (convId: string) => {
-    if (messages[convId]) return; // already loaded
-    setLoadingMsgs(true);
+  const fetchTickets = useCallback(async () => {
+    setLoadingTickets(true);
     try {
-      const res = await listMessages(convId, { limit: 50 });
-      setMessages((prev) => ({ ...prev, [convId]: (res.messages || []) as Msg[] }));
-    } catch { /* ignore */ }
-    setLoadingMsgs(false);
-  }, [messages]);
+      const res = await getAdminTickets({ limit: 50 });
+      const ticketsData = (res?.data || []) as Ticket[];
+      setTickets(ticketsData);
+      const unread = ticketsData.reduce((acc: number, t: Ticket) => acc + (t.unreadCount || 0), 0);
+      setUnreadTicketCount(unread);
+    } catch (error) {
+      console.error('Failed to fetch tickets:', error);
+    }
+    setLoadingTickets(false);
+  }, []);
+
+  const loadTicketDetails = useCallback(async (ticketId: string) => {
+    try {
+      const res = await getAdminTicket(ticketId);
+      const ticket = res?.data as Ticket;
+      setActiveTicket(ticket);
+      setTicketNotifications(prev => ({ ...prev, [ticketId]: 0 }));
+      setUnreadTicketCount(prev => Math.max(0, prev - (ticket?.unreadCount || 0)));
+    } catch (error) {
+      console.error('Failed to load ticket:', error);
+      toast.error('Failed to load ticket details');
+    }
+  }, []);
+
+  useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
   useEffect(() => {
-    if (activeConvId) loadMessages(activeConvId);
-  }, [activeConvId]);
+    if (activeTicketId) loadTicketDetails(activeTicketId);
+  }, [activeTicketId, loadTicketDetails]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeConvId, activeMessages.length]);
+    if (!socket) return;
 
-  const getOtherParticipant = (conv: Conv) =>
-    conv.participants.find((p: Conv) => p.userId !== adminId) ?? conv.participants[0];
+    const onNewTicket = () => {
+      toast.success('New support ticket');
+      playNotificationSound();
+      fetchTickets();
+      setUnreadTicketCount(prev => prev + 1);
+    };
 
-  const handleSend = async () => {
-    if (!input.trim() || !activeConvId) return;
-    const text = input.trim();
-    setInput('');
+    const onNewMessage = (data: { ticketId?: string; message?: TicketMessage }) => {
+      if (data?.message?.senderType === 'user') {
+        playNotificationSound();
+        toast.success(
+          data.message.senderName ? `New message from ${data.message.senderName}` : 'New message',
+        );
+        if (activeTicketId && data.ticketId === activeTicketId) loadTicketDetails(activeTicketId);
+        else fetchTickets();
+      }
+    };
+
+    const onTicketUpdated = () => { playNotificationSound(); fetchTickets(); };
+    const onResolved = () => { playNotificationSound(); toast.success('Ticket resolved'); fetchTickets(); };
+    const onClosed = () => { toast.success('Ticket closed'); fetchTickets(); };
+    const onNotification = (notif: { title?: string; body?: string }) => {
+      playNotificationSound();
+      toast(notif?.title ? `${notif.title}: ${notif.body || ''}` : 'New notification');
+    };
+
+    socket.on('new_ticket', onNewTicket);
+    socket.on('new_ticket_message', onNewMessage);
+    socket.on('ticket_updated', onTicketUpdated);
+    socket.on('ticket_resolved', onResolved);
+    socket.on('ticket_closed', onClosed);
+    socket.on('new_notification', onNotification);
+
+    return () => {
+      socket.off('new_ticket', onNewTicket);
+      socket.off('new_ticket_message', onNewMessage);
+      socket.off('ticket_updated', onTicketUpdated);
+      socket.off('ticket_resolved', onResolved);
+      socket.off('ticket_closed', onClosed);
+      socket.off('new_notification', onNotification);
+    };
+  }, [socket, activeTicketId, fetchTickets, loadTicketDetails, playNotificationSound]);
+
+  const handleSendTicketMessage = async () => {
+    if (!ticketInput.trim() || !activeTicketId) return;
+    const text = ticketInput.trim();
+    setTicketInput('');
     try {
-      const res = await sendChatMessage(activeConvId, { text, type: 'text' });
-      const newMsg = res.message as Msg;
-      setMessages((prev) => ({
-        ...prev,
-        [activeConvId]: [...(prev[activeConvId] ?? []), newMsg],
-      }));
-      setConversations((prev) =>
-        prev.map((c) =>
-          (c._id || c.id) === activeConvId
-            ? { ...c, lastMessage: { text, imageUrl: null, senderId: adminId, senderType: 'admin', timestamp: new Date().toISOString() }, updatedAt: new Date().toISOString() }
-            : c
-        )
-      );
-    } catch { /* ignore */ }
+      // Server expects { message }, not { text }.
+      const res = await sendAdminMessage(activeTicketId, { message: text });
+      const updated = res?.data?.ticket as Ticket | undefined;
+      if (updated) {
+        setActiveTicket(updated);
+        setTickets(prev =>
+          prev.map(t => (t._id === activeTicketId ? { ...t, lastMessageAt: updated.lastMessageAt } : t)),
+        );
+      } else {
+        // Fall back to a local append if the response shape ever changes.
+        const localMsg: TicketMessage = {
+          _id: `local-${Date.now()}`,
+          senderId: 'me',
+          senderType: 'admin',
+          senderName: 'Admin',
+          text,
+          createdAt: new Date().toISOString(),
+          readBy: [],
+        };
+        setActiveTicket(prev => (prev ? { ...prev, messages: [...prev.messages, localMsg] } : prev));
+      }
+      toast.success('Replied to ticket');
+      fetchTickets();
+    } catch {
+      toast.error('Failed to send message');
+    }
   };
 
-  const startNewConversation = async (userId: string, userType: 'provider' | 'customer') => {
+  const handleResolveTicket = async () => {
+    if (!activeTicketId) return;
     try {
-      const res = await createOrGetConversation(userId, userType);
-      const conv = res.conversation as Conv;
-      const convId = conv._id || conv.id;
-      setConversations((prev) => {
-        const exists = prev.find((c) => (c._id || c.id) === convId);
-        return exists ? prev : [conv, ...prev];
-      });
-      setActiveConvId(convId);
-      setShowNewChat(false);
-    } catch { /* ignore */ }
+      // ✅ No body — the controller ignores extra args.
+      await resolveTicket(activeTicketId);
+      setTickets(prev => prev.map(t => (t._id === activeTicketId ? { ...t, status: 'resolved' as const } : t)));
+      setActiveTicket(prev => (prev ? { ...prev, status: 'resolved' as const } : prev));
+      toast.success('Ticket resolved');
+      fetchTickets();
+    } catch {
+      toast.error('Failed to resolve ticket');
+    }
   };
 
-  const allUsers = [
-    ...providers.map((p: Conv) => ({ id: p._id || p.id, name: p.fullName, type: 'provider' as const, sub: p.service?.category || 'Provider', phone: p.phoneNumber })),
-    ...customers.map((c: Conv) => ({ id: c._id || c.id, name: c.fullName, type: 'customer' as const, sub: c.location?.city || 'Customer', phone: c.phoneNumber })),
-  ];
+  const handleCloseTicket = async () => {
+    if (!activeTicketId) return;
+    try {
+      // ✅ No second arg.
+      await adminCloseTicket(activeTicketId);
+      setTickets(prev => prev.map(t => (t._id === activeTicketId ? { ...t, status: 'closed' as const } : t)));
+      setActiveTicketId(null);
+      setActiveTicket(null);
+      toast.success('Ticket closed');
+      fetchTickets();
+    } catch {
+      toast.error('Failed to close ticket');
+    }
+  };
+
+  const handleAssignToMe = async () => {
+    if (!activeTicketId) return;
+    try {
+      // ✅ Backend assigns to the requesting admin.
+      await assignTicket(activeTicketId);
+      toast.success('Ticket assigned to you');
+      loadTicketDetails(activeTicketId);
+      fetchTickets();
+    } catch {
+      toast.error('Failed to assign ticket');
+    }
+  };
 
   return (
-    <Layout title="Chat">
-      <div className="flex h-[calc(100vh-130px)] bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-        {/* Sidebar */}
-        <div className="w-80 flex-shrink-0 border-r border-gray-100 flex flex-col">
-          <div className="p-4 border-b border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-gray-800 text-sm">Conversations</h2>
-              <button
-                onClick={() => setShowNewChat(!showNewChat)}
-                className="p-1.5 rounded-lg bg-[#165B43] text-white hover:bg-[#0e3f2e] transition-colors"
-                title="New conversation"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-
-            {/* New Chat User Search */}
-            {showNewChat && (
-              <div className="mb-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
-                <p className="text-xs font-semibold text-gray-600 mb-2">Start new conversation</p>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {allUsers.map((u) => (
-                    <button
-                      key={u.id}
-                      onClick={() => startNewConversation(u.id, u.type)}
-                      className="flex items-center gap-2 w-full p-2 rounded-lg hover:bg-white transition-colors text-left"
-                    >
-                      <Avatar name={u.name} size="sm" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-gray-800 truncate">{u.name}</p>
-                        <p className="text-[10px] text-gray-500">{u.sub} · {u.type}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="relative">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#165B43]/30"
-              />
-            </div>
+    <Layout title='Support Tickets'>
+      <div className='flex h-full'>
+        {/* ── Left pane: ticket list ────────────────────────────── */}
+        <div className='w-full lg:w-96 border-r border-gray-200 flex flex-col'>
+          <div className='px-4 py-3 border-b border-gray-100 flex items-center justify-between'>
+            <h2 className='text-sm font-semibold text-gray-800'>
+              Tickets
+              {unreadTicketCount > 0 && (
+                <span className='ml-2 text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded-full'>
+                  {unreadTicketCount > 9 ? '9+' : unreadTicketCount}
+                </span>
+              )}
+            </h2>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
-            {filteredConvs.length === 0 ? (
-              <div className="text-center py-8 text-gray-400 text-xs">No conversations</div>
+          <div className='flex-1 overflow-y-auto p-3'>
+            {loadingTickets ? (
+              <div className='text-center py-8 text-gray-400 text-xs'>Loading tickets...</div>
+            ) : tickets.length === 0 ? (
+              <div className='text-center py-8 text-gray-400'>
+                <LifeBuoy size={32} className='mx-auto mb-2 opacity-20' />
+                <p className='text-sm'>No support tickets</p>
+                <p className='text-xs mt-1'>Users will open tickets here</p>
+              </div>
             ) : (
-              filteredConvs
+              tickets
                 .slice()
-                .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-                .map((conv) => {
-                  const other = getOtherParticipant(conv);
-                  const convId = conv._id || conv.id;
-                  const unread = (conv.unreadCounts instanceof Map ? conv.unreadCounts.get(adminId) : conv.unreadCounts?.[adminId]) ?? 0;
-                  const isActive = convId === activeConvId;
+                .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+                .map((ticket) => {
+                  const isActive = ticket._id === activeTicketId;
+                  const unread = ticketNotifications[ticket._id] ?? ticket.unreadCount ?? 0;
                   return (
                     <button
-                      key={convId}
-                      onClick={() => setActiveConvId(convId)}
+                      key={ticket._id}
+                      onClick={() => setActiveTicketId(ticket._id)}
                       className={`flex items-start gap-3 w-full px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 text-left ${isActive ? 'bg-[#165B43]/5 border-l-2 border-l-[#165B43]' : ''}`}
                     >
-                      <div className="relative">
-                        <Avatar name={other.name} size="sm" />
+                      <div className='relative'>
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-xs ${ticket.user.userType === 'provider' ? 'bg-blue-500' : 'bg-amber-500'}`}>
+                          {ticket.user.name?.charAt(0)?.toUpperCase() || 'U'}
+                        </div>
                         {unread > 0 && (
-                          <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D6A643] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                            {unread}
+                          <span className='absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center'>
+                            {unread > 9 ? '9+' : unread}
                           </span>
                         )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <p className="text-xs font-semibold text-gray-800 truncate">{other.name}</p>
-                          {conv.lastMessage && (
-                            <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">
-                              {fmtConvDate(conv.lastMessage.timestamp)}
-                            </span>
-                          )}
+                      <div className='flex-1 min-w-0'>
+                        <div className='flex items-center justify-between mb-0.5'>
+                          <p className='text-xs font-semibold text-gray-800 truncate'>{ticket.user.name}</p>
+                          <span className='text-[10px] text-gray-400 flex-shrink-0 ml-2'>{fmtConvDate(ticket.lastMessageAt)}</span>
                         </div>
-                        <p className="text-[11px] text-gray-500 truncate">
-                          {conv.lastMessage
-                            ? `${conv.lastMessage.senderType === 'admin' ? 'You: ' : ''}${conv.lastMessage.text}`
-                            : 'No messages yet'}
-                        </p>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full mt-0.5 inline-block font-medium ${
-                          other.actorType === 'provider' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'
-                        }`}>
-                          {other.actorType}
-                        </span>
+                        <p className='text-[11px] text-gray-500 truncate'>{ticket.subject}</p>
+                        <div className='flex items-center gap-2 mt-1'>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${getStatusBadge(ticket.status)}`}>
+                            {ticket.status.replace('-', ' ').toUpperCase()}
+                          </span>
+                          {ticket.assignedTo && <span className='text-[9px] text-gray-400'>• Assigned</span>}
+                        </div>
                       </div>
                     </button>
                   );
@@ -227,123 +309,121 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Chat Area */}
-        {activeConv ? (
-          <div className="flex-1 flex flex-col">
-            {/* Chat Header */}
-            {(() => {
-              const other = getOtherParticipant(activeConv);
-              const userDetail = other.actorType === 'provider'
-                ? providers.find((p: Conv) => (p._id || p.id) === other.userId)
-                : customers.find((c: Conv) => (c._id || c.id) === other.userId);
-              const phone = userDetail?.phoneNumber;
-
-              return (
-                <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 bg-white">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={other.name} size="md" />
-                    <div>
-                      <p className="font-semibold text-gray-800 text-sm">{other.name}</p>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500 capitalize">{other.actorType}</span>
-                        {phone && (
-                          <a href={`tel:${phone}`} className="text-xs text-[#165B43] font-mono hover:underline flex items-center gap-0.5">
-                            <Phone size={9} />{phone}
-                          </a>
-                        )}
-                      </div>
-                    </div>
+        {/* ── Right pane: active ticket ─────────────────────────── */}
+        <div className='flex-1 flex flex-col'>
+          {activeTicket ? (
+            <>
+              <div className='px-4 py-3 border-b border-gray-100 flex items-center justify-between'>
+                <div className='flex items-center gap-3'>
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-xs ${activeTicket.user.userType === 'provider' ? 'bg-blue-500' : 'bg-amber-500'}`}>
+                    {activeTicket.user.name?.charAt(0)?.toUpperCase() || 'U'}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {phone && (
-                      <a href={`tel:${phone}`}>
-                        <Button variant="secondary" size="sm" icon={<Phone size={14} />}>Call</Button>
-                      </a>
-                    )}
+                  <div>
+                    <p className='text-sm font-semibold text-gray-800'>{activeTicket.user.name}</p>
+                    <p className='text-[10px] text-gray-400'>{activeTicket.user.userType}</p>
                   </div>
                 </div>
-              );
-            })()}
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-gray-50">
-              {loadingMsgs ? (
-                <div className="flex items-center justify-center h-full text-gray-400 text-sm">Loading messages...</div>
-              ) : activeMessages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                  <MessageSquare size={40} className="mb-2 opacity-20" />
-                  <p className="text-sm">No messages yet. Start the conversation.</p>
+                <div className='flex items-center gap-2'>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${getStatusBadge(activeTicket.status)}`}>
+                    {activeTicket.status.replace('-', ' ').toUpperCase()}
+                  </span>
+                  {activeTicket.assignedTo && (
+                    <span className='text-[10px] text-gray-500'>
+                      Assigned to: {activeTicket.assignedTo.slice(0, 6)}...
+                    </span>
+                  )}
                 </div>
-              ) : (
-                activeMessages.map((msg) => {
-                  const isAdmin = msg.senderId === adminId || msg.senderType === 'admin';
-                  return (
-                    <div key={msg._id || msg.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
-                      {!isAdmin && (
-                        <Avatar name={msg.senderName} size="sm" />
-                      )}
-                      <div className={`max-w-xs lg:max-w-md ml-2 mr-2 ${isAdmin ? 'order-first' : ''}`}>
+              </div>
+
+              <div className='flex-1 overflow-y-auto p-4 space-y-3'>
+                {activeTicket.messages.length === 0 ? (
+                  <div className='flex flex-col items-center justify-center h-full text-gray-400'>
+                    <LifeBuoy size={40} className='mb-2 opacity-20' />
+                    <p className='text-sm'>No messages yet</p>
+                  </div>
+                ) : (
+                  activeTicket.messages.map((msg, i) => {
+                    const isAdmin = msg.senderType === 'admin';
+                    return (
+                      <div key={msg._id || `m-${i}`} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
                         {!isAdmin && (
-                          <p className="text-[10px] text-gray-500 mb-1 ml-1">{msg.senderName}</p>
+                          <div className='w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 font-bold text-xs flex-shrink-0'>
+                            {msg.senderName?.charAt(0)?.toUpperCase() || 'U'}
+                          </div>
                         )}
-                        <div className={`px-3.5 py-2.5 rounded-2xl text-sm ${
-                          isAdmin
+                        <div className={`max-w-xs lg:max-w-md mx-2 ${isAdmin ? 'order-first' : ''}`}>
+                          {!isAdmin && <p className='text-[10px] text-gray-500 mb-1 ml-1'>{msg.senderName}</p>}
+                          <div className={`px-3.5 py-2.5 rounded-2xl text-sm ${isAdmin
                             ? 'bg-[#165B43] text-white rounded-br-sm'
-                            : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm shadow-sm'
-                        }`}>
-                          {msg.imageUrl ? (
-                            <img src={msg.imageUrl} alt="attachment" className="rounded-lg max-w-full" />
-                          ) : (
-                            <p className="leading-relaxed">{msg.text}</p>
-                          )}
-                        </div>
-                        <div className={`flex items-center gap-1 mt-0.5 ${isAdmin ? 'justify-end' : 'justify-start'}`}>
-                          <span className="text-[10px] text-gray-400">{fmtTime(msg.createdAt)}</span>
-                          {isAdmin && (
-                            msg.readBy.length > 0
-                              ? <CheckCheck size={11} className="text-[#D6A643]" />
-                              : <Check size={11} className="text-gray-400" />
-                          )}
+                            : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm shadow-sm'}`}>
+                            <p className='leading-relaxed'>{msg.text}</p>
+                          </div>
+                          <div className={`flex items-center gap-1 mt-0.5 ${isAdmin ? 'justify-end' : 'justify-start'}`}>
+                            <span className='text-[10px] text-gray-400'>{fmtTime(msg.createdAt)}</span>
+                            {isAdmin && (
+                              (msg.readBy?.length ?? 0) > 0
+                                ? <CheckCheck size={11} className='text-[#D6A643]' />
+                                : <Check size={11} className='text-gray-400' />
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+                    );
+                  })
+                )}
+              </div>
 
-            {/* Input */}
-            <div className="px-4 py-3 bg-white border-t border-gray-100">
-              <div className="flex items-center gap-2">
-                <button className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-                  <Image size={18} />
-                </button>
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                  placeholder="Type a message..."
-                  className="flex-1 px-4 py-2.5 text-sm bg-gray-100 border-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#165B43]/20"
-                />
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim()}
-                  className="p-2.5 rounded-xl bg-[#165B43] text-white hover:bg-[#0e3f2e] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <Send size={16} />
-                </button>
+              {activeTicket.status !== 'closed' && activeTicket.status !== 'resolved' && (
+                <div className='px-4 py-3 border-t border-gray-100'>
+                  <div className='flex items-center gap-2'>
+                    <input
+                      type='text'
+                      value={ticketInput}
+                      onChange={(e) => setTicketInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendTicketMessage(); } }}
+                      placeholder='Reply to support ticket...'
+                      className='flex-1 px-4 py-2.5 text-sm bg-gray-100 border-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#165B43]/20'
+                    />
+                    <Button variant='primary' size='sm' icon={<Send size={14} />} onClick={handleSendTicketMessage} disabled={!ticketInput.trim()}>
+                      Send
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className='px-4 pb-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3'>
+                {(activeTicket.status === 'open' || activeTicket.status === 'in-progress') && (
+                  <>
+                    {!activeTicket.assignedTo && (
+                      <Button variant='secondary' size='sm' onClick={handleAssignToMe}>
+                        Assign to me
+                      </Button>
+                    )}
+                    <Button variant='primary' size='sm' onClick={handleResolveTicket}>
+                      Resolve
+                    </Button>
+                    <Button variant='secondary' size='sm' onClick={handleCloseTicket}>
+                      Close
+                    </Button>
+                  </>
+                )}
+                {(activeTicket.status === 'resolved' || activeTicket.status === 'closed') && (
+                  <Button variant='ghost' size='sm' onClick={handleCloseTicket}>
+                    Close
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className='flex-1 flex items-center justify-center'>
+              <div className='text-center'>
+                <LifeBuoy size={48} className='mx-auto mb-3 opacity-20' />
+                <p className='text-sm text-gray-400'>Select a support ticket to view</p>
+                <p className='text-xs text-gray-300 mt-1'>All user support requests appear here</p>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-            <MessageSquare size={48} className="mb-3 opacity-20" />
-            <p className="text-sm">Select a conversation to start chatting</p>
-            <p className="text-xs mt-1">Or start a new chat with a provider or customer</p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </Layout>
   );

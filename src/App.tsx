@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider } from './context/AuthContext';
+import { SocketProvider } from './context/SocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages
@@ -24,6 +25,10 @@ import CallsPage from './pages/Calls/CallsPage';
 import AgentsPage from './pages/Agents/AgentsPage';
 import NotificationsPage from './pages/Notifications/NotificationsPage';
 import SettingsPage from './pages/Settings/SettingsPage';
+import FinanceOverviewPage from './pages/Finance/FinanceCards';
+import PayoutsPage from './pages/Finance/PayoutsPage';
+import EngagementPage from './pages/Engagement/EngagementPage';
+import MarketplaceLivePage from './pages/Marketplace/MarketplaceLivePage';
 
 function PrivateRoute({ element }: { element: React.ReactNode }) {
   return <ProtectedRoute>{element}</ProtectedRoute>;
@@ -33,6 +38,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AppProvider>
+        <SocketProvider>
         <BrowserRouter>
           <Routes>
             {/* Public */}
@@ -51,7 +57,11 @@ export default function App() {
             <Route path="/marketplace/orders" element={<PrivateRoute element={<OrdersPage />} />} />
             <Route path="/marketplace/stores" element={<PrivateRoute element={<StoresPage />} />} />
             <Route path="/marketplace/products" element={<PrivateRoute element={<ProductsPage />} />} />
+            <Route path="/marketplace/live" element={<PrivateRoute element={<MarketplaceLivePage />} />} />
             <Route path="/transactions" element={<PrivateRoute element={<TransactionsPage />} />} />
+            <Route path="/finance" element={<PrivateRoute element={<FinanceOverviewPage />} />} />
+            <Route path="/payouts" element={<PrivateRoute element={<PayoutsPage />} />} />
+            <Route path="/engagement" element={<PrivateRoute element={<EngagementPage />} />} />
             <Route path="/kyc" element={<PrivateRoute element={<KYCPage />} />} />
             <Route path="/chat" element={<PrivateRoute element={<ChatPage />} />} />
             <Route path="/calls" element={<PrivateRoute element={<CallsPage />} />} />
@@ -64,6 +74,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
+        </SocketProvider>
       </AppProvider>
     </AuthProvider>
   );

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout/Layout';
 import Card, { CardHeader, CardBody } from '../../components/UI/Card';
-import { Badge, KYCStatusBadge, BookingStatusBadge } from '../../components/UI/Badge';
+import { Badge, KYCStatusBadge, normalizeKycStatus, BookingStatusBadge } from '../../components/UI/Badge';
 import Button from '../../components/UI/Button';
 import Avatar from '../../components/UI/Avatar';
 import ConfirmDialog from '../../components/UI/ConfirmDialog';
@@ -118,7 +118,7 @@ export default function ProviderDetail() {
                 <h2 className="text-xl font-bold text-gray-800">{provider.fullName}</h2>
                 {provider.isBanned && <Badge variant="danger"><Ban size={10} />Banned</Badge>}
                 <Badge variant={provider.accountType === 'business' ? 'gold' : 'info'}>{provider.accountType}</Badge>
-                <KYCStatusBadge status={provider.kyc?.status || 'not_started'} />
+                <KYCStatusBadge status={normalizeKycStatus(provider)} />
               </div>
               <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-3">
                 <a href={`mailto:${provider.email}`} className="flex items-center gap-1 hover:text-[#165B43]">
@@ -328,14 +328,14 @@ export default function ProviderDetail() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <p className="font-semibold text-sm">KYC Verification</p>
-              <KYCStatusBadge status={provider.kyc?.status || 'not_started'} />
+              <KYCStatusBadge status={normalizeKycStatus(provider)} />
             </div>
           </CardHeader>
           <CardBody>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="space-y-3">
-              <InfoRow label="Status" value={(provider.kyc?.status || 'not_started').replace(/_/g, ' ')} />
-              <InfoRow label="Reviewed At" value={provider.kyc?.reviewedAt ? fmtDate(provider.kyc.reviewedAt) : '—'} />
+              <InfoRow label="Status" value={normalizeKycStatus(provider).replace(/_/g, ' ')} />
+              {provider.kyc?.reviewedAt && <InfoRow label="Reviewed At" value={fmtDate(provider.kyc.reviewedAt)} />}
               {provider.kyc?.rejectionReason && <InfoRow label="Rejection Reason" value={provider.kyc.rejectionReason} />}
               </div>
               <div className="space-y-3">
@@ -359,10 +359,10 @@ export default function ProviderDetail() {
                 )}
               </div>
             </div>
-            {(provider.kyc?.status === 'pending' || provider.kyc?.status === 'submitted') && (
+            <p className="text-[11px] text-gray-400 mt-4">Full document review &amp; approve/reject actions live on the <a href="/kyc" className="text-[#165B43] hover:underline">KYC Verification</a> page.</p>
+            {(normalizeKycStatus(provider) === 'pending' || normalizeKycStatus(provider) === 'submitted') && (
               <div className="flex gap-3 mt-5 pt-5 border-t border-gray-100">
-                <Button variant="primary" size="sm" icon={<Star size={14} />}>Approve KYC</Button>
-                <Button variant="danger" size="sm">Reject KYC</Button>
+                <Button variant="primary" size="sm" icon={<Star size={14} />} onClick={() => window.location.href = '/kyc'}>Review on KYC page</Button>
               </div>
             )}
           </CardBody>

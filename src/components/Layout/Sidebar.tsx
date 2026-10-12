@@ -2,17 +2,25 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, UserCheck, Tag, CalendarCheck, Wrench,
   ShoppingBag, Package, CreditCard, ShieldCheck, MessageSquare, Phone,
-  Bell, UserCog, Settings, LogOut, Store, X,
+  Bell, UserCog, Settings, LogOut, Store, X, Wallet, Radio, Activity,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useOpsRealtime } from '../../hooks/useOpsRealtime';
 import logoIcon from '../../assets/logo.png';
 import logoText from '../../assets/serveNaija-text.png';
 
-const navGroups = [
+type BadgeKey = null | 'chat' | 'total';
+type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; badgeKey?: BadgeKey };
+type NavGroup = { label: string; items: NavItem[] };
+
+const navGroups: NavGroup[] = [
   {
     label: 'Overview',
     items: [
       { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/finance', icon: Wallet, label: 'Finance' },
+      { to: '/payouts', icon: CreditCard, label: 'Payouts' },
+      { to: '/engagement', icon: Activity, label: 'Engagement' },
     ],
   },
   {
@@ -35,6 +43,7 @@ const navGroups = [
     items: [
       { to: '/bookings', icon: CalendarCheck, label: 'Bookings' },
       { to: '/marketplace/orders', icon: ShoppingBag, label: 'Orders' },
+      { to: '/marketplace/live', icon: Radio, label: 'Market Live' },
       { to: '/marketplace/stores', icon: Store, label: 'Stores' },
       { to: '/marketplace/products', icon: Package, label: 'Products' },
       { to: '/transactions', icon: CreditCard, label: 'Transactions' },
@@ -49,9 +58,9 @@ const navGroups = [
   {
     label: 'Communication',
     items: [
-      { to: '/chat', icon: MessageSquare, label: 'Chat' },
+      { to: '/chat', icon: MessageSquare, label: 'Chat', badgeKey: 'chat' as BadgeKey },
       { to: '/calls', icon: Phone, label: 'Calls' },
-      { to: '/notifications', icon: Bell, label: 'Notifications' },
+      { to: '/notifications', icon: Bell, label: 'Notifications', badgeKey: 'total' as BadgeKey },
     ],
   },
   {
@@ -70,6 +79,7 @@ interface SidebarProps {
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { logout } = useAuth();
+  const { unreadChat, unreadTotal } = useOpsRealtime();
 
   const handleLogout = () => {
     logout();
@@ -116,7 +126,9 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               {group.label}
             </p>
             <div className="space-y-0.5">
-              {group.items.map(({ to, icon: Icon, label }) => (
+              {group.items.map(({ to, icon: Icon, label, badgeKey }) => {
+                const badge = badgeKey === 'chat' ? unreadChat : badgeKey === 'total' ? unreadTotal : 0;
+                return (
                 <NavLink
                   key={to}
                   to={to}
@@ -129,8 +141,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 >
                   <Icon size={14} className="flex-shrink-0" />
                   <span className="flex-1 truncate">{label}</span>
+                  {badge > 0 && (
+                    <span className="min-w-5 h-5 px-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                      {badge > 9 ? '9+' : badge}
+                    </span>
+                  )}
                 </NavLink>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}

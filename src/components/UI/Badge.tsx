@@ -38,12 +38,25 @@ export function BookingStatusBadge({ status }: { status: string }) {
 }
 
 // KYC status badge
+// Accepts BOTH the KYC-collection states (not_started/submitted/rejected)
+// and the Provider.kycStatus enum values (idle/pending/approved/failed).
 export function KYCStatusBadge({ status }: { status: string }) {
   const map: Record<string, Variant> = {
-    not_started: 'default', submitted: 'info', pending: 'warning',
-    approved: 'success', rejected: 'danger',
+    not_started: 'default', idle: 'default',
+    submitted: 'info', pending: 'warning',
+    approved: 'success',
+    rejected: 'danger', failed: 'danger',
   };
   return <Badge variant={map[status] ?? 'default'}>{status.replace(/_/g, ' ')}</Badge>;
+}
+
+// Normalize any KYC source (Provider.kycStatus OR kyc.status object) into a
+// single display value the badge understands.
+export function normalizeKycStatus(p: { kycStatus?: string; kyc?: { status?: string } }): string {
+  const raw = p.kycStatus || p.kyc?.status || 'idle';
+  if (raw === 'not_started') return 'not_started';
+  if (raw === 'failed') return 'failed';
+  return raw;
 }
 
 // Payment status badge

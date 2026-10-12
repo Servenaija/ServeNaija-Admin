@@ -20,7 +20,7 @@ export function clearToken(): void {
 
 // ─── Axios instance ──────────────────────────────────────────────────────────
 
-const apiClient: AxiosInstance = axios.create({
+  const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
