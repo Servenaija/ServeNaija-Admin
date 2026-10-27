@@ -9,6 +9,7 @@ import Modal from '../../components/UI/Modal';
 import { listKYC, approveKYC, rejectKYC } from '../../services/api';
 import type { KYCStatus } from '../../types';
 import { CheckCircle, XCircle, ExternalLink, ShieldCheck, Clock, Eye } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -33,7 +34,7 @@ export default function KYCPage() {
     setLoading(true);
     listKYC({ search: search || undefined, status: statusFilter !== 'all' ? statusFilter : undefined, limit: 100, page: 0 })
       .then((res) => { setKycRecords(res.records as Row[]); setTotal(res.total); })
-      .catch(() => {})
+      .catch((e) => { toast.error((e as Error).message || 'Failed to load KYC records'); })
       .finally(() => setLoading(false));
   };
 

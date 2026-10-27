@@ -3,6 +3,7 @@ import {
   LayoutDashboard, Users, UserCheck, Tag, CalendarCheck, Wrench,
   ShoppingBag, Package, CreditCard, ShieldCheck, MessageSquare, Phone,
   Bell, UserCog, Settings, LogOut, Store, X, Wallet, Radio, Activity,
+  Mail,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useOpsRealtime } from '../../hooks/useOpsRealtime';
@@ -58,6 +59,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'Communication',
     items: [
+      { to: '/contact', icon: Mail, label: 'Contact' },
       { to: '/chat', icon: MessageSquare, label: 'Chat', badgeKey: 'chat' as BadgeKey },
       { to: '/calls', icon: Phone, label: 'Calls' },
       { to: '/notifications', icon: Bell, label: 'Notifications', badgeKey: 'total' as BadgeKey },

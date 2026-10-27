@@ -484,3 +484,45 @@ export async function cancelPromotion(id: string): Promise<{ message: string; pr
   const response = await apiClient.put<{ message: string; promotion: unknown }>(`/admins/promotions/${id}/cancel`);
   return response.data;
 }
+
+// ─── Contact Messages ─────────────────────────────────────────────
+
+export interface ContactMessage {
+  _id: string;
+  name: string;
+  email: string;
+  topic: string;
+  message: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface ContactListResponse {
+  data: ContactMessage[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export async function listContacts(params?: { page?: number; limit?: number; isRead?: boolean }): Promise<ContactListResponse> {
+  const response = await apiClient.get<ContactListResponse>('/contact/messages', { params });
+  return response.data;
+}
+
+export async function getContact(id: string): Promise<{ data: ContactMessage }> {
+  const response = await apiClient.get<{ data: ContactMessage }>(`/contact/${id}`);
+  return response.data;
+}
+
+export async function updateContactStatus(id: string, isRead: boolean): Promise<{ data: ContactMessage }> {
+  const response = await apiClient.put<{ data: ContactMessage }>(`/contact/${id}`, { isRead });
+  return response.data;
+}
+
+export async function deleteContact(id: string): Promise<{ message: string }> {
+  const response = await apiClient.delete<{ message: string }>(`/contact/${id}`);
+  return response.data;
+}

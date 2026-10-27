@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const [topProviders, setTopProviders] = useState<Row[]>([]);
   const [kycV2, setKycV2] = useState<{ pending: number; approved: number; noKyc: number } | null>(null);
   const [paystack, setPaystack] = useState<{ available: number; unavailable?: boolean } | null>(null);
+  const [v2Data, setV2Data] = useState<{ totalRevenue: number; todayRevenue: number; revenueBreakdown: { bookings: number; marketplace: number; subscriptions: number }; todayRevenueBreakdown: { bookings: number; marketplace: number; subscriptions: number } } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -53,6 +54,15 @@ export default function DashboardPage() {
         if (v2?.kyc) setKycV2(v2.kyc);
         if (fin?.paystack) setPaystack(fin.paystack);
         else if (fin?.totals) setPaystack({ available: 0, unavailable: true });
+        // Store v2 revenue data
+        if (v2) {
+          setV2Data({
+            totalRevenue: v2.totalRevenue || 0,
+            todayRevenue: v2.todayRevenue || 0,
+            revenueBreakdown: v2.revenueBreakdown || { bookings: 0, marketplace: 0, subscriptions: 0 },
+            todayRevenueBreakdown: v2.todayRevenueBreakdown || { bookings: 0, marketplace: 0, subscriptions: 0 },
+          });
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -81,6 +91,11 @@ export default function DashboardPage() {
   const noKyc = kycV2?.noKyc;
   const approvedKyc = kycV2?.approved;
 
+  const totalRev = v2Data?.totalRevenue ?? s.totalRevenue ?? 0;
+  const todayRev = v2Data?.todayRevenue ?? s.todayRevenue ?? 0;
+  const revBreakdown = v2Data?.revenueBreakdown ?? { bookings: 0, marketplace: 0, subscriptions: 0 };
+  const todayRevBreakdown = v2Data?.todayRevenueBreakdown ?? { bookings: 0, marketplace: 0, subscriptions: 0 };
+
   return (
     <Layout title="Dashboard">
       {paystack && (
@@ -96,11 +111,14 @@ export default function DashboardPage() {
         <StatCard title="Total Providers" value={s.totalProviders} icon={UserCheck} color="#165B43" trend={12} sub={`${s.activeProviders} active · ${pendingKyc} KYC pending${noKyc !== undefined ? ` · ${noKyc} no KYC` : ''}`} />
         <StatCard title="Total Customers" value={s.totalCustomers} icon={Users} color="#D6A643" trend={18} sub={`${s.activeCustomers} active`} />
         <StatCard title="Total Bookings" value={s.totalBookings} icon={CalendarCheck} color="#3b82f6" trend={8} sub={`${s.pendingBookings} pending · ${s.disputedBookings} disputed`} />
-        <StatCard title="Platform Revenue" value={fmt(s.totalRevenue)} icon={DollarSign} color="#10b981" trend={15} sub={`Today: ${fmt(s.todayRevenue)}`} />
+        <StatCard title="Platform Revenue" value={fmt(totalRev)} icon={DollarSign} color="#10b981" trend={15} sub={`Today: ${fmt(todayRev)}`} />
+        <StatCard title="Booking Fees" value={fmt(revBreakdown.bookings)} icon={CalendarCheck} color="#3b82f6" trend={0} sub={`${revBreakdown.bookings > 0 ? Math.round(revBreakdown.bookings / 1500) : 0} bookings × ₦1,500`} />
+        <StatCard title="Marketplace (10%)" value={fmt(revBreakdown.marketplace)} icon={ShoppingBag} color="#f97316" trend={0} />
+        <StatCard title="Subscriptions" value={fmt(revBreakdown.subscriptions)} icon={ShieldCheck} color="#8b5cf6" trend={0} />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard title="Platform Fees" value={fmt(s.platformFees)} icon={TrendingUp} color="#8b5cf6" />
+        <StatCard title="Platform Fees (Total)" value={fmt(totalRev)} icon={TrendingUp} color="#8b5cf6" />
         <StatCard title="Completed Bookings" value={s.completedBookings} icon={CheckCircle2} color="#10b981" />
         <StatCard title="Total Orders" value={s.totalOrders} icon={ShoppingBag} color="#f97316" />
         <StatCard title="Disputed Bookings" value={s.disputedBookings} icon={AlertTriangle} color="#ef4444" />

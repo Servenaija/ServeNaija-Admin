@@ -23,6 +23,7 @@ import KYCPage from './pages/KYC/KYCPage';
 import ChatPage from './pages/Chat/ChatPage';
 import CallsPage from './pages/Calls/CallsPage';
 import AgentsPage from './pages/Agents/AgentsPage';
+import ContactPage from './pages/Contact/ContactPage';
 import NotificationsPage from './pages/Notifications/NotificationsPage';
 import SettingsPage from './pages/Settings/SettingsPage';
 import FinanceOverviewPage from './pages/Finance/FinanceCards';
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="/chat" element={<PrivateRoute element={<ChatPage />} />} />
             <Route path="/calls" element={<PrivateRoute element={<CallsPage />} />} />
             <Route path="/agents" element={<PrivateRoute element={<AgentsPage />} />} />
+            <Route path="/contact" element={<PrivateRoute element={<ContactPage />} />} />
             <Route path="/notifications" element={<PrivateRoute element={<NotificationsPage />} />} />
             <Route path="/settings" element={<PrivateRoute element={<SettingsPage />} />} />
 

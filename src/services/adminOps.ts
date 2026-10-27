@@ -118,4 +118,81 @@ export async function sendDirectMessage(targetUserId: string, targetActorType: '
   return data;
 }
 
+// ─── Agent payouts ─────────────────────────────────────────────
+
+export interface AgentPayoutRow {
+  agentId: string;
+  userId: string;
+  userType: 'customer' | 'provider';
+  agentCode: string;
+  userDetails: Any;
+  bankDetails: Any;
+  walletBalance: number;
+  pendingPayout: number;
+  totalEarned: number;
+  totalPaidOut: number;
+  totalCustomerReferrals: number;
+  totalProviderReferrals: number;
+  totalReferrals: number;
+  totalOwed: number;
+  isActive: boolean;
+  createdAt: string;
+  referralCount: number;
+  unpaidReferrals: number;
+}
+
+export async function getAgentPayoutQueue(params?: { page?: number; limit?: number }): Promise<{ items: AgentPayoutRow[]; total: number; page: number; limit: number; totalPages: number; payoutTotal: number }> {
+  const { data } = await opsClient.get('/admin-ops/agent-payouts/queue', { params });
+  return data;
+}
+
+export async function releaseAgentPayout(agentId: string, note?: string): Promise<Any> {
+  const { data } = await opsClient.post('/admin-ops/agent-payouts/release', { agentId, note });
+  return data;
+}
+
+export async function releaseBulkAgentPayouts(params: { items?: string[]; releaseAll?: boolean; note?: string }): Promise<Any> {
+  const { data } = await opsClient.post('/admin-ops/agent-payouts/release-bulk', params);
+  return data;
+}
+
+// ─── Paystack transaction receipts ─────────────────────────────
+
+export interface PaystackTransaction {
+  id: number;
+  domain: string;
+  reference: string;
+  amount: number;
+  currency: string;
+  transaction_date: string;
+  status: string;
+  gateway_response: string;
+  channel: string;
+  fees?: number | null;
+  customer: Any;
+  plan?: Any;
+  metadata?: Any;
+}
+
+export interface PaystackTransactionResponse {
+  status: boolean;
+  message: string;
+  data: PaystackTransaction[];
+  meta: {
+    total: number;
+    perPage: number;
+    page: number;
+    pageCount: number;
+  };
+}
+
+export async function getPaystackTransactions(params?: {
+  perPage?: number;
+  page?: number;
+  customer?: string;
+}): Promise<PaystackTransactionResponse> {
+  const { data } = await opsClient.get('/admin-ops/paystack/transactions', { params });
+  return data;
+}
+
 export default opsClient;
