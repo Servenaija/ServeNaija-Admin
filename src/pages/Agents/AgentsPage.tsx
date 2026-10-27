@@ -99,7 +99,7 @@ export default function AgentsPage() {
   const filtered = payoutQueue.filter((a) => {
     const q = search.toLowerCase();
     return !q ||
-      (a.userDetails?.firstName || '').toLowerCase().includes(q) ||
+      (a.userDetails?.fullName || '').toLowerCase().includes(q) ||
       (a.agentCode || '').toLowerCase().includes(q);
   });
 
