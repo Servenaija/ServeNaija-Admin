@@ -126,6 +126,7 @@ export interface AgentPayoutRow {
   userType: 'customer' | 'provider';
   agentCode: string;
   userDetails: Any;
+  userResolved: boolean;
   bankDetails: Any;
   walletBalance: number;
   pendingPayout: number;

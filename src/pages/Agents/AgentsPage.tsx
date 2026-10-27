@@ -27,8 +27,7 @@ export default function AgentsPage() {
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutTotal, setPayoutTotal] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
-  const [payMode, setPayMode] = useState<'all' | 'selected' | 'each' | null>(null);
-  const [payToAgentId, setPayToAgentId] = useState<string | null>(null);
+  const [payMode, setPayMode] = useState<'all' | 'selected' | null>(null);
   const [releasing, setReleasing] = useState(false);
 
   useEffect(() => {
@@ -53,7 +52,18 @@ export default function AgentsPage() {
     }
   };
 
-  const doPayEach = (agentId: string) => { setPayToAgentId(agentId); setPayMode('each'); };
+  const confirmPayEach = async (agentId: string) => {
+    setReleasing(true);
+    try {
+      const res = await releaseAgentPayout(agentId, 'Agent payout via admin');
+      toast.success(`Paid ₦{(res.result as any)?.amount || 0}.`);
+      await loadPayoutQueue();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setReleasing(false);
+    }
+  };
 
   const doPaySelected = () => {
     if (!selected.length) return;
@@ -65,13 +75,7 @@ export default function AgentsPage() {
   const confirmPay = async () => {
     setReleasing(true);
     try {
-      if (payMode === 'each' && payToAgentId) {
-        const res = await releaseAgentPayout(payToAgentId, 'Agent payout via admin');
-        toast.success(`Paid ₦{(res.result as any)?.amount || 0}.`);
-        setPayToAgentId(null);
-        setPayMode(null);
-        await loadPayoutQueue();
-      } else if (payMode === 'selected') {
+      if (payMode === 'selected') {
         const res = await releaseBulkAgentPayouts({ items: selected, note: 'Agent payout via admin' });
         toast.success(res.message || 'Selected agents paid.');
         setSelected([]);
@@ -89,14 +93,13 @@ export default function AgentsPage() {
     } finally {
       setReleasing(false);
       setPayMode(null);
-      setPayToAgentId(null);
     }
   };
 
   const filtered = payoutQueue.filter((a) => {
     const q = search.toLowerCase();
     return !q ||
-      (a.userDetails?.fullName || '').toLowerCase().includes(q) ||
+      (a.userDetails?.firstName || '').toLowerCase().includes(q) ||
       (a.agentCode || '').toLowerCase().includes(q);
   });
 
@@ -133,7 +136,12 @@ export default function AgentsPage() {
           <Avatar name={a.userDetails?.fullName || a.agentCode || '?'} size="sm" />
           <div>
             <p className="font-medium text-gray-800 text-sm">{a.userDetails?.fullName || a.agentCode}</p>
-            <Badge variant={a.userType === 'provider' ? 'info' : 'gold'} className="text-[9px]">{a.userType}</Badge>
+            <div className="flex items-center gap-1.5">
+              <Badge variant={a.userType === 'provider' ? 'info' : 'gold'} className="text-[9px]">{a.userType}</Badge>
+              {!a.userResolved && (
+                <Badge variant="danger" className="text-[9px]">Unresolved</Badge>
+              )}
+            </div>
           </div>
         </div>
       ),
@@ -188,7 +196,7 @@ export default function AgentsPage() {
           variant="primary"
           size="sm"
           disabled={releasing}
-          onClick={(e) => { e.stopPropagation(); doPayEach(a.agentId); }}
+          onClick={(e) => { e.stopPropagation(); confirmPayEach(a.agentId); }}
         >
           Pay {fmtN(a.totalOwed)}
         </Button>
@@ -244,19 +252,6 @@ export default function AgentsPage() {
       />
 
       {/* Confirmation dialogs */}
-      {payMode === 'each' && payToAgentId && (
-        <ConfirmDialog
-          open={true}
-          title="Pay agent?"
-          message={`Pay ₦{(payoutQueue.find((a) => a.agentId === payToAgentId)?.totalOwed || 0).toLocaleString()} to this agent? Their earnings will be reset to zero.`}
-          confirmLabel="Pay Now"
-          onCancel={() => { setPayMode(null); setPayToAgentId(null); }}
-          onConfirm={confirmPay}
-          variant="primary"
-          loading={releasing}
-        />
-      )}
-
       {payMode === 'selected' && (
         <ConfirmDialog
           open={true}
